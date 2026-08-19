@@ -17,7 +17,17 @@ from typing import Dict, List, Optional
 import aiohttp
 
 from .validators import InputValidator
-from config.settings import settings
+
+# 与其他工具模块一致：config 不在 sys.path 时回退读环境变量（脚本独立运行场景）
+try:
+    from config.settings import settings
+except ImportError:
+    import os
+
+    class _FallbackSettings:
+        AMAP_API_KEY = os.getenv("AMAP_API_KEY", "")
+
+    settings = _FallbackSettings()
 
 logger = logging.getLogger(__name__)
 

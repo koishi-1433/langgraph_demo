@@ -8,19 +8,40 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-# 项目根目录入 path：mcp_server 子模块使用 `from config.settings` 绝对导入，需依赖此设置
-_root = Path(__file__).resolve().parent
-if str(_root) not in sys.path:
-    sys.path.insert(0, str(_root))
+# 双路径注入，保证两种运行方式都可用：
+#   1. 包方式（python -m uvicorn langgraph_demo.app:app）→ 依赖父目录可导入 langgraph_demo 包
+#   2. 脚本方式（python langgraph_demo/app.py）→ 相对导入不可用，app.py 内部必须用绝对导入
+# 同时注入 langgraph_demo 目录本身，mcp_server 子模块依赖 `from config.settings` 绝对导入
+_root = Path(__file__).resolve().parent  # langgraph_demo/
+_parent = _root.parent                   # 项目父目录
+for _p in (_parent, _root):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
-from .config.logger import get_logger
-from .workflow.graph import TravelPlanWorkflow
+# 包限定绝对导入（langgraph_demo.* 前缀）：
+#   - 锚点唯一，不会与环境中其他名为 config/workflow/mcp_server 的库冲突
+#   - 支持 `python langgraph_demo/app.py` 直接运行（父目录已注入 sys.path）
+from langgraph_demo.config.logger import get_logger
+from langgraph_demo.workflow.graph import TravelPlanWorkflow
 
 logger = get_logger(__name__)
+
+# ── FastAPI 应用 ──────────────────────────────────────────────
+app = FastAPI(title="旅游助手智能体", version="1.0.0")
+
+# CORS：允许任意来源（含 file:// 打开时的 origin "null"、本地开发其他端口）
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ── 对话内存（JSON 文件持久化） ──────────────────────────────
 _MEMORY_DIR = Path(__file__).parent / ".chat_memory"
@@ -75,6 +96,7 @@ def _append_message(sid: str, role: str, content: str, intent: str = "") -> None
 # ── Pydantic 请求模型 ─────────────────────────────────────────
 class ChatRequest(BaseModel):
     message: str
+    session_id: str | None = None
     gps_lat: float | None = None
     gps_lng: float | None = None
     address: dict[str, str] = {}
@@ -109,10 +131,7 @@ INTENTS = [
 ]
 
 
-# ── FastAPI 应用 ──────────────────────────────────────────────
-app = FastAPI(title="旅游助手智能体", version="1.0.0")
-
-# 项目根目录（用于定位 index.html）
+# ── 项目根目录（用于定位 index.html） ────────────────────────
 _ui_dir = Path(__file__).parent
 
 # 全局工作流实例（首次请求时懒加载）
@@ -148,10 +167,10 @@ async def get_intents():
 async def reverse_geocode(lat: float, lng: float):
     """逆地理编码：经纬度 -> 地址信息。"""
     try:
-        from .mcp_server.tool_amap.wrappers import regeocode as _regeocode
+        from langgraph_demo.mcp_server.tool_amap.async_wrappers import regeocode as _regeocode
 
-        # 同步 wrapper 内部使用 asyncio.run，需在线程中执行
-        raw = await asyncio.to_thread(_regeocode, f"{lng},{lat}")
+        # 异步封装直接 await，不再需要 to_thread
+        raw = await _regeocode(f"{lng},{lat}")
         parsed = json.loads(raw)
 
         if parsed.get("status") == "success":
@@ -200,7 +219,17 @@ async def chat_stream(req: ChatRequest):
                     user_input = f"[位于{city}{district}] {user_input}"
 
             workflow = await _get_workflow()
-            session_id = str(uuid.uuid4())
+            # 复用前端传入的 session_id；新会话才生成新 UUID
+            session_id = req.session_id or str(uuid.uuid4())
+
+            # 加载该会话的历史（用于多轮记忆）
+            chat_history: list[dict] = []
+            existing = _load_session(session_id)
+            if existing:
+                chat_history = [
+                    {"role": m.get("role", ""), "content": m.get("content", "")}
+                    for m in existing.get("messages", [])
+                ]
 
             # 追加用户消息到历史
             _append_message(session_id, "user", req.message)
@@ -208,8 +237,8 @@ async def chat_stream(req: ChatRequest):
             # 发送 intent 事件
             yield f"event: step\ndata: {json.dumps({'message': '正在分析...', 'phase': 'analyzing'}, ensure_ascii=False)}\n\n"
 
-            # 运行工作流
-            final_state = await workflow.run(user_input, gps_coords=gps_coords)
+            # 运行工作流（携带历史上下文）
+            final_state = await workflow.run(user_input, gps_coords=gps_coords, history=chat_history)
 
             final_output = final_state.get("final_output", "")
             intent = final_state.get("intent", "unknown")
@@ -224,8 +253,8 @@ async def chat_stream(req: ChatRequest):
                         yield f"event: partial\ndata: {json.dumps({'text': seg}, ensure_ascii=False)}\n\n"
                         await asyncio.sleep(0.05)  # 小延迟模拟逐字效果
 
-            # done 事件
-            yield f"event: done\ndata: {json.dumps({'intent': intent}, ensure_ascii=False)}\n\n"
+            # done 事件（回传 session_id，前端新会话时保存以便续接）
+            yield f"event: done\ndata: {json.dumps({'intent': intent, 'session_id': session_id}, ensure_ascii=False)}\n\n"
 
             # 追加助手回复到历史
             _append_message(session_id, "assistant", final_output, intent)
@@ -268,3 +297,8 @@ async def delete_session(session_id: str):
         raise HTTPException(status_code=404, detail="会话不存在")
     p.unlink()
     return {"status": "ok"}
+
+if __name__ == '__main__':
+    import uvicorn
+
+    uvicorn.run("langgraph_demo.app:app", host="0.0.0.0", port=8000)

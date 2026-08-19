@@ -511,6 +511,8 @@
     <script>
         let isLoading = false;
         let intents = [];
+        // 当前会话 ID（localStorage 持久化，刷新页面后仍可续接同一会话）
+        let currentSessionId = localStorage.getItem('travel_session_id') || '';
 
         const messagesContainer = document.getElementById('messagesContainer');
         const messageInput = document.getElementById('messageInput');
@@ -537,6 +539,8 @@
             messageInput.addEventListener('input', updateSendBtnState);
             loadIntents();
             checkServiceStatus();
+            // 每 30 秒轮询服务状态
+            setInterval(checkServiceStatus, 30000);
             // 打开网页自动获取 GPS 定位
             setTimeout(autoGetGPS, 500);
         });
@@ -593,68 +597,6 @@
             );
         }
         
-        // 手动点击定位按钮的实现（补充完整逻辑）
-        function getGPSLocation() {
-            if (!navigator.geolocation) {
-                showError('您的浏览器不支持GPS定位');
-                return;
-            }
-            
-            const gpsBtn = document.getElementById('gpsBtn');
-            gpsBtn.innerHTML = '<span>📍</span> 定位中...';
-            gpsBtn.disabled = true;
-        
-            navigator.geolocation.getCurrentPosition(
-                async (position) => {
-                    // 1. 缓存经纬度
-                    window._cachedGPS = {
-                        lat: position.coords.latitude,
-                        lng: position.coords.longitude
-                    };
-        
-                    try {
-                        // 2. 调用逆地理编码接口，获取完整地址
-                        const locResp = await fetch(`${API_BASE}/location?lat=${window._cachedGPS.lat}&lng=${window._cachedGPS.lng}`);
-                        const locData = await locResp.json();
-                        
-                        if (locData.status === 'success') {
-                            // 3. 缓存完整地址
-                            window._cachedAddress = {
-                                province: locData.province || '',
-                                city: locData.city || '',
-                                district: locData.district || '',
-                                township: locData.township || '',
-                                street: locData.street || '',
-                                streetNumber: locData.street_number || '',
-                                neighborhood: locData.neighborhood || '',
-                                building: locData.building || '',
-                                fullAddress: locData.full_address || '',
-                                detailedAddress: locData.detailed_address || ''
-                            };
-                            showError(`定位成功：${window._cachedAddress.city || '未知城市'}`);
-                            console.log('手动定位地址:', window._cachedAddress);
-                        } else {
-                            showError('获取地址失败，请重试');
-                        }
-                    } catch (err) {
-                        showError('地理编码服务异常');
-                        console.error(err);
-                    } finally {
-                        gpsBtn.innerHTML = '<span>📍</span> 定位';
-                        gpsBtn.disabled = false;
-                    }
-                },
-                (err) => {
-                    gpsBtn.innerHTML = '<span>📍</span> 定位';
-                    gpsBtn.disabled = false;
-                    if (err.code === err.PERMISSION_DENIED) {
-                        showError('您拒绝了定位权限，请手动输入城市');
-                    } else {
-                        showError('定位失败：' + err.message);
-                    }
-                }
-            );
-        }
 
         function updateCharCount() {
             const length = messageInput.value.length;
@@ -699,7 +641,7 @@
                         <span class="message-time">${time}</span>
                     </div>
                     <div class="message-text">
-                        <div class="text-content">${intent === 'route' ? formatRouteContent(content) : content}</div>
+                        <div class="text-content">${intent === 'route' ? formatRouteContent(content) : escapeHtml(content)}</div>
                         ${intentHtml}
                     </div>
                 </div>
@@ -708,31 +650,6 @@
             messagesContainer.appendChild(messageDiv);
             if (welcomeMessage) welcomeMessage.style.display = 'none';
             scrollToBottom();
-        }
-
-        function showLoading() {
-            const loadingDiv = document.createElement('div');
-            loadingDiv.className = 'message-item assistant';
-            loadingDiv.id = 'loadingMessage';
-            loadingDiv.innerHTML = `
-                <div class="message-avatar assistant">🤖</div>
-                <div class="message-content">
-                    <div class="message-header">
-                        <span class="message-name">旅游助手</span>
-                        <span class="message-time">${getCurrentTime()}</span>
-                    </div>
-                    <div class="message-text">
-                        <div class="loading-dots"><span></span><span></span><span></span></div>
-                    </div>
-                </div>
-            `;
-            messagesContainer.appendChild(loadingDiv);
-            scrollToBottom();
-        }
-
-        function hideLoading() {
-            const el = document.getElementById('loadingMessage');
-            if (el) el.remove();
         }
 
         async function sendMessage() {
@@ -773,25 +690,27 @@
             const intentDiv = assistantDiv.querySelector('#streamIntent');
 
             // 构造请求体：包含消息和缓存的GPS坐标
-              const body = {
-                     message: message,
-                     // 经纬度（原有）
-                     gps_lat: window._cachedGPS?.lat,
-                     gps_lng: window._cachedGPS?.lng,
-                     // 新增：完整地址信息
-                     address: {
-                         province: window._cachedAddress?.province || '',
-                         city: window._cachedAddress?.city || '',
-                         district: window._cachedAddress?.district || '',
-                         township: window._cachedAddress?.township || '',
-                         street: window._cachedAddress?.street || '',
-                         streetNumber: window._cachedAddress?.streetNumber || '',
-                         neighborhood: window._cachedAddress?.neighborhood || '',
-                         building: window._cachedAddress?.building || '',
-                         fullAddress: window._cachedAddress?.fullAddress || '',
-                         detailedAddress: window._cachedAddress?.detailedAddress || ''
-                     }
-                 };
+            const body = {
+                message: message,
+                // 会话 ID：续接同一会话（多轮记忆）
+                session_id: currentSessionId,
+                // 经纬度（原有）
+                gps_lat: window._cachedGPS?.lat,
+                gps_lng: window._cachedGPS?.lng,
+                // 新增：完整地址信息
+                address: {
+                    province: window._cachedAddress?.province || '',
+                    city: window._cachedAddress?.city || '',
+                    district: window._cachedAddress?.district || '',
+                    township: window._cachedAddress?.township || '',
+                    street: window._cachedAddress?.street || '',
+                    streetNumber: window._cachedAddress?.streetNumber || '',
+                    neighborhood: window._cachedAddress?.neighborhood || '',
+                    building: window._cachedAddress?.building || '',
+                    fullAddress: window._cachedAddress?.fullAddress || '',
+                    detailedAddress: window._cachedAddress?.detailedAddress || ''
+                }
+            };
             try {
                 const response = await fetch(API_BASE + '/chat/stream', {
                     method: 'POST',
@@ -832,8 +751,8 @@
                                         contentDiv.style.display = '';
                                         hasContent = true;
                                     }
-                                    partialText += `\n${data.message}`;
-                                    contentDiv.textContent = partialText;
+                                    // 状态提示仅作临时占位，首个 partial 到达后即被正文替换（不混入正文）
+                                    contentDiv.textContent = data.message || '';
                                     scrollToBottom();
                                 } else if (currentEventType === 'partial') {
                                     if (!hasContent) {
@@ -842,17 +761,17 @@
                                         hasContent = true;
                                     }
                                     partialText += data.text;
-                                    // 对于路线规划意图，使用HTML格式化显示
-                                    if (finalIntent === 'route') {
-                                        contentDiv.innerHTML = formatRouteContent(partialText);
-                                    } else {
-                                        contentDiv.textContent = partialText;
-                                    }
+                                    // formatRouteContent 返回安全 HTML（路线→结构化；非路线→转义文本）
+                                    contentDiv.innerHTML = formatRouteContent(partialText);
                                     scrollToBottom();
                                 } else if (currentEventType === 'done') {
                                     finalIntent = data.intent || '';
+                                    if (data.session_id && data.session_id !== currentSessionId) {
+                                        currentSessionId = data.session_id;
+                                        localStorage.setItem('travel_session_id', currentSessionId);
+                                    }
                                     if (finalIntent && finalIntent !== 'unknown') {
-                                        intentDiv.innerHTML = `<span class="tag tag-${getIntentType(finalIntent)}">● ${getIntentName(finalIntent)}</span>`;
+                                        intentDiv.innerHTML = `<span class="tag tag-${getIntentType(finalIntent)}">● ${escapeHtml(getIntentName(finalIntent))}</span>`;
                                     }
                                 } else if (currentEventType === 'error') {
                                     showError(data.error || '处理失败');
@@ -888,10 +807,13 @@
         }
 
         function clearChat() {
-            if (!confirm('确定要清空所有对话吗？')) return;
+            if (!confirm('确定要清空当前对话并开启新会话吗？')) return;
             const items = messagesContainer.querySelectorAll('.message-item');
             items.forEach(item => item.remove());
             if (welcomeMessage) welcomeMessage.style.display = 'flex';
+            // 开启新会话：重置 session_id，后续请求将创建新会话
+            currentSessionId = '';
+            localStorage.removeItem('travel_session_id');
         }
 
         function getIntentType(intent) {
@@ -907,12 +829,14 @@
         function formatRouteContent(content) {
             /**
              * 格式化路线规划内容，提取并美化路线详情
+             * 契约：输入纯文本 → 输出安全 HTML（路线→结构化容器；非路线→转义文本）
+             * 关键词与后端 ROUTE_SYSTEM_PROMPT / route_planner 输出格式匹配（LLM 自由输出，宽松匹配）
              */
-            if (!content || typeof content !== 'string') return content;
+            if (!content || typeof content !== 'string') return escapeHtml(content);
 
-            // 检测是否为路线规划内容
-            if (!content.includes('🗺️ 路线规划') && !content.includes('路线详情')) {
-                return content;
+            // 检测是否为路线规划内容（第1段/总统计/车次等后端实际输出标记）
+            if (!/第[123]段|总统计|路线规划|路线详情|车次|推荐高铁|火车出行/.test(content)) {
+                return escapeHtml(content);
             }
 
             // 创建路线信息容器
@@ -922,23 +846,31 @@
             // 分割内容行
             const lines = content.split('\n');
             let currentSection = '';
-            let routeDetails = [];
+            let headerCreated = false;
 
             for (let i = 0; i < lines.length; i++) {
                 const line = lines[i].trim();
                 if (!line) continue;
 
-                // 检测主要信息行
-                if (line.includes('🗺️ 路线规划')) {
+                // 总览标题：第1段 / 路线规划 开头行
+                if (!headerCreated && /第1段|路线规划/.test(line)) {
                     const routeHeader = document.createElement('div');
                     routeHeader.className = 'route-header';
-                    routeHeader.innerHTML = `
-                        <div class="route-title">🗺️ 路线规划</div>
-                        <div class="route-summary">${line.replace('🗺️ 路线规划:', '')}</div>
-                    `;
+                    const routeTitle = document.createElement('div');
+                    routeTitle.className = 'route-title';
+                    routeTitle.textContent = '🗺️ 路线规划';
+                    const routeSummary = document.createElement('div');
+                    routeSummary.className = 'route-summary';
+                    routeSummary.textContent = line;
+                    routeHeader.appendChild(routeTitle);
+                    routeHeader.appendChild(routeSummary);
                     routeContainer.appendChild(routeHeader);
+                    headerCreated = true;
+                    continue;
                 }
-                else if (line.includes('📏 距离') || line.includes('⏱️ 用时') || line.includes('💰 费用') || line.includes('🚌 交通方式')) {
+
+                // 统计行：总距离/总耗时/总费用/距离:/用时:/费用:
+                if (/总距离|总耗时|总费用|距离[:：]|用时[:：]|费用[:：]|📏|⏱️|💰/.test(line)) {
                     if (!routeContainer.querySelector('.route-stats')) {
                         const statsContainer = document.createElement('div');
                         statsContainer.className = 'route-stats';
@@ -948,54 +880,55 @@
                     statItem.className = 'route-stat-item';
                     statItem.textContent = line;
                     routeContainer.querySelector('.route-stats').appendChild(statItem);
+                    continue;
                 }
-                else if (line.includes('📋 路线详情')) {
+
+                // 路线详情块
+                if (/路线详情/.test(line)) {
                     currentSection = 'details';
                     const detailsContainer = document.createElement('div');
                     detailsContainer.className = 'route-details';
                     const detailsTitle = document.createElement('div');
                     detailsTitle.className = 'route-details-title';
-                    detailsTitle.textContent = '📋 路线详情';
+                    detailsTitle.textContent = line.includes('📋') ? line : '📋 路线详情';
                     detailsContainer.appendChild(detailsTitle);
                     routeContainer.appendChild(detailsContainer);
+                    continue;
                 }
-                else if (currentSection === 'details' && line.startsWith('  ')) {
-                    // 路线详情内容
-                    const detailItem = document.createElement('div');
-                    detailItem.className = 'route-detail-item';
 
-                    // 检测特殊格式
-                    if (line.includes('【') && line.includes('】')) {
-                        detailItem.className = 'route-detail-section';
-                        detailItem.innerHTML = line.replace('  ', '');
-                    } else {
-                        detailItem.textContent = line.replace('  ', '');
-                    }
-
-                    const detailsContainer = routeContainer.querySelector('.route-details');
-                    if (detailsContainer) {
-                        detailsContainer.appendChild(detailItem);
-                    }
-                }
-                else if (line.includes('推荐高铁/火车出行方案')) {
+                // 火车方案块（已存在则把该行作为车次条目加入）
+                if (/推荐高铁|火车出行|第2段：火车|车次/.test(line)) {
                     currentSection = 'train';
-                    const trainContainer = document.createElement('div');
-                    trainContainer.className = 'train-info';
-                    const trainTitle = document.createElement('div');
-                    trainTitle.className = 'train-info-title';
-                    trainTitle.textContent = '🚄 推荐火车出行方案';
-                    trainContainer.appendChild(trainTitle);
-                    routeContainer.appendChild(trainContainer);
-                }
-                else if (currentSection === 'train' && line.trim()) {
-                    const trainItem = document.createElement('div');
-                    trainItem.className = 'train-scheme';
-                    trainItem.textContent = line.replace('  ', '');
-
-                    const trainContainer = routeContainer.querySelector('.train-info');
-                    if (trainContainer) {
-                        trainContainer.appendChild(trainItem);
+                    const existingTrain = routeContainer.querySelector('.train-info');
+                    if (!existingTrain) {
+                        const trainContainer = document.createElement('div');
+                        trainContainer.className = 'train-info';
+                        const trainTitle = document.createElement('div');
+                        trainTitle.className = 'train-info-title';
+                        trainTitle.textContent = '🚄 推荐火车出行方案';
+                        trainContainer.appendChild(trainTitle);
+                        routeContainer.appendChild(trainContainer);
+                    } else {
+                        const trainItem = document.createElement('div');
+                        trainItem.className = 'train-scheme';
+                        trainItem.textContent = line;
+                        existingTrain.appendChild(trainItem);
                     }
+                    continue;
+                }
+
+                // 详情/火车块内的内容行（安全构建：textContent 防注入）
+                if (currentSection === 'details' || currentSection === 'train') {
+                    const item = document.createElement('div');
+                    item.className = currentSection === 'details' ? 'route-detail-item' : 'train-scheme';
+                    if (currentSection === 'details' && /【.*】/.test(line)) {
+                        item.className = 'route-detail-section';
+                    }
+                    item.textContent = line;
+                    const container = routeContainer.querySelector(
+                        currentSection === 'details' ? '.route-details' : '.train-info'
+                    );
+                    if (container) container.appendChild(item);
                 }
             }
 
@@ -1137,7 +1070,7 @@
                 html += `<div style="margin:8px 0;padding:10px 14px;border-radius:10px;background:${isUser ? 'rgba(8,145,178,0.06)' : 'var(--bg-card-solid)'};border:1px solid var(--border-light);">
                     <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">
                         ${isUser ? '👤 我' : '🤖 助手'} · ${formatTime(msg.timestamp)}
-                        ${msg.intent ? `<span class="tag tag-${getIntentType(msg.intent)}" style="font-size:10px;margin-left:6px;">${getIntentName(msg.intent)}</span>` : ''}
+                        ${msg.intent ? `<span class="tag tag-${getIntentType(msg.intent)}" style="font-size:10px;margin-left:6px;">${escapeHtml(getIntentName(msg.intent))}</span>` : ''}
                     </div>
                     <div style="font-size:13px;line-height:1.6;color:var(--text-primary);white-space:pre-wrap;word-break:break-word;">${escapeHtml(msg.content)}</div>
                 </div>`;
@@ -1164,6 +1097,9 @@
             if (!confirm('确定要清空所有对话记录吗？此操作不可恢复。')) return;
             try {
                 await fetch(API_BASE + '/memory/sessions', { method: 'DELETE' });
+                // 清空本地会话引用，下次发送将开启新会话
+                currentSessionId = '';
+                localStorage.removeItem('travel_session_id');
                 refreshHistory();
             } catch (e) {
                 alert('清空失败');
@@ -1224,12 +1160,7 @@
                                 detailedAddress: data.detailed_address || ''
                             };
 
-                            const msg = `从我的位置到`;
-                            messageInput.value = msg;
-                            messageInput.focus();
-                            messageInput.setSelectionRange(msg.length, msg.length);
-
-                            // ✅ 只在控制台输出，不显示到对话框
+                            // ✅ 只在控制台输出，不覆盖用户已输入的内容
                             console.log("📍 GPS 定位成功：", window._cachedAddress.city);
                             console.log("📍 完整地址：", window._cachedAddress.detailedAddress);
                         } else {
@@ -1241,8 +1172,6 @@
                         console.log("📍 GPS 定位异常", e);
                     }
 
-                    updateCharCount();
-                    updateSendBtnState();
                     gpsBtn.disabled = false;
                     gpsBtn.innerHTML = '<span>📍</span> 已定位';
                     setTimeout(() => { gpsBtn.innerHTML = '<span>📍</span> 定位'; }, 3000);

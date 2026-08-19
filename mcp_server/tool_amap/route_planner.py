@@ -8,20 +8,12 @@
 3. 第一段显示从城市中心点到出发站的驾车距离/用时
 4. 第三段显示从到达站到目的地
 """
-import sys
-import os
 import logging
 from datetime import datetime
 from typing import Dict, List, Optional
 from .client import UnifiedAMapClient
 from .train_crawler import Py12306Client
 from .utils import estimate_train_cost, format_duration, format_distance, format_cost
-
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
-
-
 
 logger = logging.getLogger(__name__)
 
@@ -102,9 +94,9 @@ class RoutePlanner:
         if enable_train_info:
             try:
                 self.train_client = Py12306Client(cache_enabled=True, timeout=15)
-                print("✅ Py12306Client 火车票查询功能已启用")
+                logger.info("✅ Py12306Client 火车票查询功能已启用")
             except Exception as e:
-                print(f"⚠️ Py12306Client 初始化失败: {e}")
+                logger.warning(f"⚠️ Py12306Client 初始化失败: {e}")
                 self.train_client = None
                 self.enable_train_info = False
         else:

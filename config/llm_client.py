@@ -28,15 +28,24 @@ class LLMClient:
         self.max_tokens = max_tokens
 
         if self.provider == "openai":
-            self.model = settings.CHATGPT_FREE_MODEL_NAME
+            self.model = settings.OPENAI_MODEL_NAME
             self.llm = ChatOpenAI(
                 model=self.model,
                 temperature=temperature,
                 max_tokens=max_tokens,
-                api_key=settings.CHATGPT_FREE_API_KEY,
-                base_url=settings.CHATGPT_FREE_BASE_URL,
+                api_key=settings.OPENAI_API_KEY,
+                base_url=settings.OPENAI_BASE_URL,
             )
-            logger.info(f"初始化OpenAI客户端，模型：{self.model}")
+        elif self.provider == "nvidia":
+            self.model = settings.NVIDIA_MODEL_NAME
+            self.llm = ChatOpenAI(
+                model=self.model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                api_key=settings.NVIDIA_API_KEY,
+                base_url=settings.NVIDIA_BASE_URL,
+            )
+            logger.info(f"初始化NVIDIA客户端，模型：{self.model}")
         else:
             raise ValueError(f"不支持的提供商：{provider}")
 

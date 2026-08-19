@@ -1,2 +1,15 @@
+# 密钥（绝不入库）
 /config/.env
+
+# 日志与缓存
 /logs/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# 运行时数据
+.chat_memory/
+
+# IDE
+.idea/
+.jbeval/

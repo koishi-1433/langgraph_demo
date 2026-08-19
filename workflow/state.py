@@ -10,9 +10,11 @@ class WorkflowState(TypedDict):
     intent: Literal["chat", "route", "search", "travel"]
     intent_confidence: float
     gps_coords: Optional[str]
+    gps_city: Optional[str]  # GPS 逆地理编码解析出的城市（出行起点候选）
     search_results: Optional[Dict[str, Any]]
     route_results: Optional[str]
     rag_results: Optional[str]
+    chat_history: Optional[List[Dict[str, str]]]  # [{role: user|assistant, content}]
     final_output: str
     error: Optional[str]
     execution_path: List[str]
