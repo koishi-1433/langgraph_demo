@@ -17,6 +17,12 @@ INTEGRATOR_SYSTEM_PROMPT = """\
 
 
 class IntegratorAgent(BaseAgent):
+    """整合 Agent：无工具，仅用 LLM 将攻略 + 路线整合为自然语言旅行方案。
+
+    在 travel 节点中消费 search 与 route 两个子任务的输出，
+    按时序（先交通后景点）合并为一份连贯、实用的总方案。
+    """
+
     def __init__(self, llm_client: LLMClient):
         super().__init__(
             llm_client=llm_client,

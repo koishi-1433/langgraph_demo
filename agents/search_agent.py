@@ -25,6 +25,12 @@ SEARCH_SYSTEM_PROMPT = """\
 
 
 class SearchAgent(BaseAgent):
+    """搜索 Agent：处理 search / travel 的攻略搜索子任务。
+
+    只授权 tavily_web_search 一个 MCP 工具；工具列表由 graph 在初始化时注入
+    （__aenter__ 中按名从 MCP 工具表分发），必须包含 tavily_web_search。
+    """
+
     def __init__(self, llm_client: LLMClient, tools=None):
         # tools 在初始化时由 graph 注入，必须包含 web_search
         super().__init__(

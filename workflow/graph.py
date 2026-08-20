@@ -5,7 +5,7 @@
     用户输入 → intent_recognition → conditional_edges → [chat|search|route|travel] → END
 
 Agent 职责：
-    - IntentAgent: 结构化输出意图分类（不走 ReAct）
+    - IntentAgent: prompt 约束 JSON 输出 + 正则解析的意图分类（不走 ReAct，见 intent_agent.py）
     - ChatAgent:   ReAct，无工具，闲聊
     - SearchAgent: ReAct，授权 tavily_web_search
     - RouteAgent:  ReAct，授权 geocode/regeocode/route_planning/py12306_query_train_schedule
@@ -88,12 +88,15 @@ class TravelPlanWorkflow:
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         logger.info("正在关闭工作流环境...")
+        # 仅清空工具引用；MCP 客户端（settings.MCP_CLIENT）为模块级共享单例，
+        # 由整个进程生命周期管理（不在此关闭），避免与其他工作流实例互相影响
         self.mcp_tools.clear()
         logger.info("工作流资源已释放")
 
     # ────────────── 图构建 ──────────────
 
     def _build_graph(self) -> StateGraph:
+        """构建并编译 StateGraph：intent_recognition 为入口，按意图条件路由到 4 个叶子节点。"""
         workflow = StateGraph(WorkflowState)
 
         # 节点
@@ -122,6 +125,10 @@ class TravelPlanWorkflow:
     # ────────────── 节点实现 ──────────────
 
     async def _intent_recognition_node(self, state: WorkflowState) -> dict:
+        """意图识别节点：调用 IntentAgent，把结果写回 state（intent / intent_confidence）。
+
+        识别失败时兜底为 chat，保证后续条件路由始终有合法分支可走。
+        """
         response = await self.intent_agent.recognize(state["user_input"])
         if response.success:
             content = response.content or {}
@@ -134,6 +141,7 @@ class TravelPlanWorkflow:
         return {"intent": intent, "intent_confidence": confidence}
 
     async def _chat_response_node(self, state: WorkflowState) -> dict:
+        """闲聊节点：ChatAgent 直接回复，不调用外部工具。"""
         history = self._to_agent_history(state.get("chat_history"))
         response = await self.chat_agent.run(state["user_input"], history=history)
         if not response.success:
@@ -143,6 +151,7 @@ class TravelPlanWorkflow:
         return {"final_output": output, "execution_path": [*state.get("execution_path", []), "chat_response"]}
 
     async def _search_node(self, state: WorkflowState) -> dict:
+        """攻略搜索节点：提取目的地 → SearchAgent 生成攻略。"""
         destination = await self._extract_destination(state["user_input"])
         if not destination:
             return self._failure_output(state, "search", "无法从输入中提取目的地，请指明城市名（如：西安）")
@@ -162,6 +171,7 @@ class TravelPlanWorkflow:
             return self._failure_output(state, "search", response.error or "未知错误")
 
     async def _find_route_node(self, state: WorkflowState) -> dict:
+        """路线规划节点：解析起终点 → RouteAgent 规划路线。"""
         origin, destination = await self._parse_location_info(state["user_input"])
         query = ""
         if origin:
@@ -283,6 +293,7 @@ class TravelPlanWorkflow:
         return converted
 
     def _route_by_intent(self, state: WorkflowState) -> Literal["chat", "route", "search", "travel"]:
+        """条件路由函数：按 intent 字段返回下一个节点名（供 conditional_edges 使用）。"""
         intent = state.get("intent", "chat")
         logger.info(f"[Router] {intent}")
         return intent
@@ -391,6 +402,17 @@ class TravelPlanWorkflow:
     # ────────────── 运行接口 ──────────────
 
     async def run(self, user_input: str, gps_coords: str = None, history: list = None) -> WorkflowState:
+        """执行一次完整的工作流，返回最终 state。
+
+        Args:
+            user_input: 用户输入。可为原始文本，或已带 [位于xx] 前缀（app.py 生成）。
+            gps_coords: 前端定位坐标 "lng,lat"；非空且输入未含定位前缀时，
+                会先逆地理编码为城市并注入 [当前位置:城市] 前缀作为出行起点候选。
+            history: 会话历史 [{role, content}, ...]，用于多轮记忆。
+
+        Returns:
+            最终 WorkflowState；异常时 error/final_output 携带失败信息，不向上抛。
+        """
         # GPS 定位城市解析：app 层已带 [位于xx] 前缀时跳过，避免重复逆地理编码
         gps_city = ""
         if gps_coords and "[位于" not in user_input and "[当前位置" not in user_input:

@@ -1,4 +1,15 @@
-"""旅游助手 FastAPI 应用 - 统一入口"""
+"""旅游助手 FastAPI 应用 - 统一入口。
+
+职责：
+- 静态 UI（index.html）与健康检查、意图定义、逆地理编码等辅助接口；
+- /chat/stream：SSE 流式聊天接口，把用户请求交给 TravelPlanWorkflow 执行，
+  并按 step → partial → done → error 事件推送进度；
+- 会话记忆：JSON 文件持久化到 .chat_memory/（会话列表 / 详情 / 删除接口）。
+
+运行方式：
+1. 包方式：python -m uvicorn langgraph_demo.app:app --host 0.0.0.0 --port 8000（推荐）
+2. 脚本方式：python langgraph_demo/app.py（内部 uvicorn.run）
+"""
 import asyncio
 import json
 import re
@@ -49,10 +60,15 @@ _MEMORY_DIR.mkdir(exist_ok=True)
 
 
 def _session_file(sid: str) -> Path:
+    """返回会话文件的路径（.chat_memory/{sid}.json）。"""
     return _MEMORY_DIR / f"{sid}.json"
 
 
 def _list_sessions() -> list[dict]:
+    """列出所有会话的摘要（按更新时间倒序）：id / title / msg_count / updated_at。
+
+    单条解析失败时跳过（容忍损坏文件），不影响整体列表。
+    """
     sessions = []
     for p in sorted(_MEMORY_DIR.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True):
         try:
@@ -69,12 +85,14 @@ def _list_sessions() -> list[dict]:
 
 
 def _save_session(sid: str, title: str, messages: list[dict]) -> None:
+    """把整个会话（id + 标题 + 消息 + 更新时间）原子写回 JSON 文件。"""
     now = datetime.now(timezone.utc).isoformat()
     data = {"id": sid, "title": title, "messages": messages, "updated_at": now}
     _session_file(sid).write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
 
 
 def _load_session(sid: str) -> dict | None:
+    """读取会话内容；文件不存在返回 None。"""
     p = _session_file(sid)
     if not p.exists():
         return None
@@ -82,7 +100,10 @@ def _load_session(sid: str) -> dict | None:
 
 
 def _append_message(sid: str, role: str, content: str, intent: str = "") -> None:
-    """追加一条消息到会话文件（原子读写）。"""
+    """追加一条消息到会话文件（读-改-写，等效原子）。
+
+    首条用户消息自动成为会话标题（取前 50 字）。
+    """
     data = _load_session(sid) or {"id": sid, "title": "", "messages": [], "updated_at": ""}
     msg: dict[str, Any] = {"role": role, "content": content, "timestamp": datetime.now(timezone.utc).isoformat()}
     if intent:
@@ -95,6 +116,13 @@ def _append_message(sid: str, role: str, content: str, intent: str = "") -> None
 
 # ── Pydantic 请求模型 ─────────────────────────────────────────
 class ChatRequest(BaseModel):
+    """/chat/stream 请求体。
+
+    - message: 用户消息文本
+    - session_id: 会话 ID（复用前端传入值续接多轮；不传则服务端新生成）
+    - gps_lat / gps_lng: 浏览器定位坐标（可选，用于推断出行起点城市）
+    - address: 浏览器逆地理编码结果 {city, district, ...}（可选，生成 [位于xx] 前缀）
+    """
     message: str
     session_id: str | None = None
     gps_lat: float | None = None
@@ -135,10 +163,13 @@ INTENTS = [
 _ui_dir = Path(__file__).parent
 
 # 全局工作流实例（首次请求时懒加载）
+# 原因：__aenter__ 要拉起 MCP 子进程并加载工具，耗时数秒；
+# 懒加载避免启动即阻塞，且全进程复用同一实例（单例语义）。
 _workflow: TravelPlanWorkflow | None = None
 
 
 async def _get_workflow() -> TravelPlanWorkflow:
+    """获取全局工作流实例（首次调用时初始化，之后复用）。"""
     global _workflow
     if _workflow is None:
         _workflow = await TravelPlanWorkflow().__aenter__()
@@ -202,15 +233,23 @@ async def reverse_geocode(lat: float, lng: float):
 
 @app.post("/chat/stream")
 async def chat_stream(req: ChatRequest):
-    """流式聊天接口，SSE 推送 step / partial / done / error 事件。"""
+    """流式聊天接口，SSE 推送 step / partial / done / error 事件。
+
+    事件流：
+    - step: 阶段进度提示（如"正在分析..."）
+    - partial: 回复文本片段（按句/段拆分，前端拼接展示）
+    - done: 结束事件（回传 intent 与 session_id）
+    - error: 异常事件（携带错误信息）
+    """
     async def event_generator():
         try:
-            # 构建 GPS 坐标字符串
+            # 构建 GPS 坐标字符串（"lng,lat"，与高德接口格式一致）
             gps_coords = None
             if req.gps_lat is not None and req.gps_lng is not None:
                 gps_coords = f"{req.gps_lng},{req.gps_lat}"
 
-            # 构建带地址上下文的 user_input
+            # 构建带地址上下文的 user_input：前端定位到城市时注入 [位于xx] 前缀，
+            # 供 graph 解析起点兜底（详见 workflow/graph.py _parse_location_info）
             user_input = req.message
             if req.address:
                 city = req.address.get("city", "")
@@ -231,10 +270,10 @@ async def chat_stream(req: ChatRequest):
                     for m in existing.get("messages", [])
                 ]
 
-            # 追加用户消息到历史
+            # 追加用户消息到历史（先持久化，即使后续失败也能回溯）
             _append_message(session_id, "user", req.message)
 
-            # 发送 intent 事件
+            # 发送 intent 事件：提示前端进入"分析中"状态
             yield f"event: step\ndata: {json.dumps({'message': '正在分析...', 'phase': 'analyzing'}, ensure_ascii=False)}\n\n"
 
             # 运行工作流（携带历史上下文）
@@ -244,9 +283,8 @@ async def chat_stream(req: ChatRequest):
             intent = final_state.get("intent", "unknown")
             execution_path = final_state.get("execution_path", [])
 
-            # SSE partial 流式输出（按段落拆分）
+            # SSE partial 流式输出（按语义分句推送：连续换行 / 句号 / 感叹号 / 问号）
             if final_output:
-                # 将长文本按语义分段推送
                 segments = re.split(r'([\n]{2,}|(?<=。)|(?<=！)|(?<=？))', final_output)
                 for seg in segments:
                     if seg:

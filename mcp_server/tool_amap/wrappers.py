@@ -1,4 +1,13 @@
-"""高德地图 & 12306 MCP 工具封装"""
+"""高德地图 & 12306 工具封装（同步兼容层）。
+
+注意：本模块是「同步兼容层」，仅供独立脚本调试 / 非异步环境调用；
+MCP stdio 服务端（mcp_server_stdio.py）实际使用的是 async_wrappers.py
+（直接 await 异步实现，避免 asyncio.run 每次新建事件循环）。
+
+- 每个函数内部通过 asyncio.new_event_loop() 跑一次异步流程，返回 JSON 字符串；
+- 会话保活（P0-V2 #2）后，独立脚本创建的客户端需在 finally 中显式关闭，
+  避免 aiohttp 会话泄漏。
+"""
 import asyncio
 import json
 from datetime import datetime
@@ -92,7 +101,7 @@ def route_planning(origin: str, destination: str, mode: str = "auto") -> str:
     finally:
         if loop:
             loop.close()
-        # 会话保活（P0-V2 #2）后，独立脚本创建的客户端需显式关闭，避免 aiohttp 会话泄漏
+        # 独立脚本创建的客户端需显式关闭，避免 aiohttp 会话泄漏
         try:
             if planner and planner.train_client:
                 asyncio.run(planner.train_client.close())
@@ -160,7 +169,7 @@ def query_train_schedule(from_station: str, to_station: str, date: Optional[str]
     finally:
         if loop:
             loop.close()
-        # 会话保活（P0-V2 #2）后，独立脚本创建的客户端需显式关闭，避免 aiohttp 会话泄漏
+        # 独立脚本创建的客户端需显式关闭，避免 aiohttp 会话泄漏
         try:
             if planner and planner.train_client:
                 asyncio.run(planner.train_client.close())

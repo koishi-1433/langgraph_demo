@@ -15,7 +15,8 @@
 - [配置说明](#配置说明)
 - [系统设计详解](#系统设计详解)
 - [测试](#测试)
-- [相关文档](#相关文档)
+- [代码注释约定](#代码注释约定)
+- [注意事项](#注意事项)
 
 ---
 
@@ -94,7 +95,8 @@ langgraph_demo/
 ├── app.py                     # ★ Web 统一入口（FastAPI + SSE）
 ├── index.html                 # 前端单页聊天 UI（原生 JS，无构建）
 ├── requirements.txt           # Python 依赖清单
-├── __init__.py                # 包标记
+├── .gitignore                 # 忽略 .env / 日志 / 缓存 / IDE 文件
+├── __init__.py                # 包 docstring（结构说明）
 │
 ├── agents/                    # ── Agent 层（LLM + prompt + 工具子集）
 │   ├── base_agent.py          #   BaseAgent：create_react_agent 封装 + 统一 run()
@@ -123,15 +125,23 @@ langgraph_demo/
 │       ├── route_planner.py   #   RoutePlanner：三段式火车路线规划（核心业务逻辑）
 │       ├── train_crawler.py   #   Py12306Client（重试+缓存+反爬+城市→车站映射）
 │       ├── async_wrappers.py  #   异步封装（供 MCP 注册，共享单例 + atexit 关闭）
-│       ├── wrappers.py        #   同步封装（独立脚本调试用）
+│       ├── wrappers.py        #   同步封装（独立脚本调试用，勿用于 MCP 服务端）
 │       ├── validators.py      #   输入校验
 │       ├── utils.py           #   费用估算 / 时长距离格式化
 │       └── data/              #   12306 车站编码缓存（json）
 │
-├── tests/                     # ── pytest 测试（离线单测 + 模拟数据回归）
+├── tests/                     # ── pytest 测试
+│   ├── conftest.py            #   路径注入 + --run-network 开关（网络用例默认跳过）
+│   ├── test_base_agent.py     #   BaseAgent：run() 与历史拼接（monkeypatch）
+│   ├── test_intent_agent.py   #   意图识别：JSON 解析 / 兜底 / 置信度钳制
+│   ├── test_graph_helpers.py  #   graph 辅助方法：起终点解析 / 目的地提取 / 输出清洗
+│   ├── test_settings.py       #   settings 加载与 MCP_PYTHON_PATH 覆盖
+│   ├── test_mcp_tools.py      #   MCP 工具回归（离线 + --run-network 端到端）
+│   ├── test_mcp_tools_simulated.py  # V2 模拟数据回归（离线，替换数据源层）
+│   └── index_smoke_gen.js     #   前端 index.html 逻辑冒烟测试（Node + DOM stub）
+│
 ├── .chat_memory/              # 会话历史持久化（运行时生成）
-├── logs/                      # 运行日志（运行时生成）
-└── 项目介绍.md / 优化方案.md / 优化报告.md / 路径引用审计.md   # 设计文档
+└── logs/                      # 运行日志（运行时生成）
 ```
 
 ---
@@ -291,28 +301,51 @@ FastAPI 提供 REST + SSE 接口，与前端单页 UI 一一对应：
 
 ## 🧪 测试
 
-```bash
-# 运行全部离线测试（默认跳过需要真实网络的用例）
-pytest
+测试位于 `tests/`，需**从项目父目录**运行（与启动 uvicorn 同一目录，保证 `langgraph_demo.*` 与 `mcp_server.*` 导入均可用）：
 
-# 运行包含真实网络/外部 API 的测试（Tavily / 高德 / 12306）
-pytest --run-network
+```bash
+# 从项目父目录进入
+cd D:\workspace\deepseekharness_space
+
+# 运行全部离线测试（默认跳过需要真实网络的用例）
+python -m pytest langgraph_demo/tests -q
+
+# 运行包含真实网络/外部 API 的测试（Tavily / 高德 / 12306，耗时较长）
+python -m pytest langgraph_demo/tests --run-network -q
 ```
 
-测试覆盖：graph 辅助方法（起终点解析、目的地提取、输出清洗、工具校验）、意图识别、BaseAgent、设置项加载，以及基于模拟数据的 MCP 工具回归（三段式路线、缓存、错误协议等）。
+> 网络用例由 `tests/conftest.py` 的 `--run-network` 开关控制：未加该参数时自动跳过（标记 `network`），保证 CI / 无密钥环境下全绿。
+
+覆盖范围（按文件）：
+
+| 文件 | 覆盖点 |
+|------|--------|
+| `test_graph_helpers.py` | 起终点解析（含 `[当前位置:xx]` / `[位于xx]` 前缀兜底）、目的地提取（规则优先→LLM→兜底）、输出清洗、工具校验、失败输出协议 |
+| `test_intent_agent.py` | 意图 JSON 解析（代码块包裹/噪音/非法值）、失败兜底 `{chat, 0.5}`、置信度钳制 |
+| `test_base_agent.py` | `run()` 的历史拼接、失败返回 `AgentResponse`（monkeypatch，无网络） |
+| `test_settings.py` | settings 加载、`MCP_PYTHON_PATH` 默认值与环境变量覆盖 |
+| `test_mcp_tools.py` | 工具注册/schema、非法参数入口拦截、`ToolResult` 结构化返回、票价估算、车站编码校验；`--run-network` 下做 5 工具端到端调用 |
+| `test_mcp_tools_simulated.py` | 替换数据源层的离线回归：三段式路线、TTL/负缓存、确定性错误不重试、余票/时段过滤、错误 hint |
+
+前端逻辑冒烟测试（非 pytest）：
+
+```bash
+node langgraph_demo/tests/index_smoke_gen.js
+```
 
 ---
 
-## 📚 相关文档
+## 📝 代码注释约定
 
-| 文档 | 内容 |
-|------|------|
-| [项目介绍.md](./项目介绍.md) | 项目详细介绍与设计决策记录 |
-| [优化方案.md](./优化方案.md) | 架构优化方案 |
-| [优化报告.md](./优化报告.md) | 重构过程报告 |
-| [路径引用审计.md](./路径引用审计.md) | 导入路径审计 |
-| [mcp_server/MCP工具总结.md](./mcp_server/MCP工具总结.md) | MCP 工具层总结 |
-| [mcp_server/工具优化方案.md](./mcp_server/工具优化方案.md) | 工具层优化方案 |
+全项目中文注释，遵循统一约定（已全量落实）：
+
+1. **模块/包 docstring** —— 每个 `.py` 文件与包 `__init__.py` 顶部说明：职责、设计决策与注意事项（如 `intent_agent.py` 解释"为什么不用 `with_structured_output`"、`wrappers.py` 标注"同步兼容层，勿用于 MCP 服务端"）。
+2. **Args / Returns / Raises** —— 公开方法与关键私有方法在 docstring 中说明参数语义、返回值结构（含失败返回值）与异常行为。
+3. **"为什么"优先于"是什么"** —— 复杂逻辑（正则解析、缓存 TTL、重试策略、兜底分支、QPS 限速）配行内注释解释原因，而非复述代码。
+4. **关键常量集中定义** —— 如 `train_crawler.py` 的 `IDX_*` 字段偏移、`mcp_server_stdio.py` 的 `_VALID_MODES`，一处定义、多处引用，注释标注格式变更时的维护点。
+5. **协议/契约显式化** —— `AgentResponse`、`ToolResult`（text + structuredContent）、SSE 事件（step/partial/done/error）等在定义处注释字段含义，消费方无需翻实现。
+
+> 注意：注释与代码同步维护。若重构行为（如意图识别方案变更），务必同步更新对应 docstring，避免出现"注释过时"（历史上曾出现过 `with_structured_output` 表述残留，已修正）。
 
 ---
 

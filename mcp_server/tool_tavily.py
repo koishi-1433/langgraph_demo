@@ -1,4 +1,11 @@
-"""Tavily Web Search MCP 工具封装"""
+"""Tavily Web Search 工具封装（同步实现，供 MCP stdio 服务端在工作线程中调用）。
+
+- 通过 langchain_tavily.TavilySearch 调用 Tavily API，返回 JSON 字符串
+  {"answer": ..., "sources": [...]}，由 mcp_server_stdio.tavily_web_search 包成 ToolResult；
+- 上层调用方（mcp_server_stdio）用 asyncio.to_thread 执行本函数，
+  避免同步网络请求阻塞事件循环；
+- settings 导入失败时回退为直接读环境变量，保证脚本可独立运行。
+"""
 import json
 from typing import Dict, Any
 
@@ -23,10 +30,12 @@ def web_search(query: str, max_results: int = None) -> str:
 
     Args:
         query: 搜索关键词
-        max_results: 返回结果数量，默认 5
+        max_results: 返回结果数量，默认取 settings.TAVILY_MAX_RESULTS（边界收敛到 1~20）
 
     Returns:
-        JSON string: {"answer": "...", "sources": [{"title":"...", "url":"...", "score":0}]}
+        JSON string:
+        - 成功: {"answer": "...", "sources": [{"title":"...", "url":"...", "score":0}]}
+        - 失败: {"error": "...", "error_code": "TAVILY_SEARCH_FAILED"}
     """
     if max_results is None:
         max_results = settings.TAVILY_MAX_RESULTS

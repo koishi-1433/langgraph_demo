@@ -8,6 +8,11 @@ CHAT_SYSTEM_PROMPT = """\
 
 
 class ChatAgent(BaseAgent):
+    """闲聊 Agent：处理 chat 意图，走 ReAct 但 tools 为空（纯 LLM 对话）。
+
+    用途：问候、知识问答等无需外部工具的场景；历史上下文由 graph 传入。
+    """
+
     def __init__(self, llm_client: LLMClient):
         super().__init__(
             llm_client=llm_client,

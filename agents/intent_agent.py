@@ -58,6 +58,18 @@ class IntentAgent:
         logger.info("[IntentAgent] 已初始化（prompt JSON 解析模式）")
 
     async def recognize(self, user_input: str) -> AgentResponse:
+        """识别用户输入的意图。
+
+        Args:
+            user_input: 用户原始输入文本。
+
+        Returns:
+            AgentResponse：
+            - success=True：content = {"intent": Literal["chat","route","search","travel"],
+                                       "confidence": float}；
+            - success=False：content 兜底为 {"intent": "chat", "confidence": 0.5}，
+              error 携带解析失败原因（保证任何输入都不中断流程）。
+        """
         try:
             prompt = _INTENT_PROMPT.format(user_input=user_input)
             raw = await self.llm_client.ainvoke(prompt)

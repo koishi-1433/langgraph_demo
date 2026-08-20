@@ -240,10 +240,30 @@ class UnifiedAMapClient:
         return None
     # ==================== 路线规划 ====================
     async def driving_route(self, origin: str, destination: str) -> Optional[Dict]:
+        """驾车路线规划（高德 v3 direction/driving）。
+
+        Args:
+            origin: 起点坐标 "lng,lat"（注意：是坐标，不是城市名）
+            destination: 终点坐标 "lng,lat"
+
+        Returns:
+            高德原始响应 dict；失败返回 None。
+        """
         params = {"origin": origin, "destination": destination}
         return await self._request(self.CAR_URL, params)
 
     async def transit_route(self, origin: str, destination: str, city: str, strategy: str = "0") -> Optional[Dict]:
+        """公交/地铁路线规划（高德 v3 direction/transit/integrated）。
+
+        Args:
+            origin: 起点坐标 "lng,lat"
+            destination: 终点坐标 "lng,lat"
+            city: 公交线路所在城市（高德公交接口必填）
+            strategy: 换乘策略，默认 "0"（最快）
+
+        Returns:
+            高德原始响应 dict；失败返回 None。
+        """
         params = {
             "origin": origin,
             "destination": destination,
@@ -254,6 +274,11 @@ class UnifiedAMapClient:
 
     # ==================== IP定位 ====================
     async def locate_by_ip(self) -> Dict:
+        """IP 定位：根据请求来源 IP 推断所在城市（无参数，高德 v3/ip）。
+
+        Returns:
+            {"status": "success"/"error", "city": "...", "location": "...", ...}
+        """
         data = await self._request(self.GPS_URL, {})
         if not data:
             return {"status": "error", "error": "IP定位请求失败"}
@@ -273,6 +298,15 @@ class UnifiedAMapClient:
 
     # ==================== 坐标转换 ====================
     async def convert_coords(self, location: str, from_coordsys: str = "gps") -> Dict:
+        """坐标系转换（高德 v3 assistant/coordinate/convert），如 GPS → GCJ-02。
+
+        Args:
+            location: 待转换坐标 "lng,lat"
+            from_coordsys: 源坐标系，默认 "gps"；可选 "mapbar"/"baidu" 等
+
+        Returns:
+            {"status": "success"/"error", "converted_location": "...", ...}
+        """
         params = {"locations": location, "coordsys": from_coordsys}
         data = await self._request(self.COORD_CONVERT_URL, params)
         if not data:
@@ -290,6 +324,15 @@ class UnifiedAMapClient:
 
     # ==================== 距离测量 ====================
     async def measure_distance(self, origins: List[str], destination: str) -> Optional[List[Dict]]:
+        """批量距离测量：多个起点到同一终点的驾车距离/时间（高德 v3/distance）。
+
+        Args:
+            origins: 起点坐标列表，每个为 "lng,lat"（一次最多 100 个）
+            destination: 终点坐标 "lng,lat"
+
+        Returns:
+            结果列表 [{distance, duration, ...}]；失败返回 None。
+        """
         params = {"origins": "|".join(origins), "destination": destination}
         data = await self._request(self.DISTANCE_URL, params)
         if not data:
@@ -301,6 +344,16 @@ class UnifiedAMapClient:
 
     # ==================== POI搜索 ====================
     async def search_poi(self, keywords: str, city: Optional[str] = None, type_: Optional[str] = None) -> List[Dict]:
+        """关键词 POI 搜索（高德 v3 place/text）。
+
+        Args:
+            keywords: 关键词，如「火车站」「海底捞」
+            city: 限定城市（可选）
+            type_: POI 类型编码（可选）
+
+        Returns:
+            POI 列表 [{name, location, address, ...}]；无结果或失败返回空列表。
+        """
         params = {"keywords": keywords, "extensions": "all"}
         if city:
             params["city"] = city
@@ -313,6 +366,16 @@ class UnifiedAMapClient:
         return []
 
     async def search_nearby(self, location: str, radius: int = 1000, keywords: Optional[str] = None) -> List[Dict]:
+        """周边 POI 搜索（高德 v3 place/around）：以某坐标为中心按半径找 POI。
+
+        Args:
+            location: 中心坐标 "lng,lat"
+            radius: 搜索半径（米），默认 1000
+            keywords: 关键词（可选）
+
+        Returns:
+            POI 列表；无结果或失败返回空列表。
+        """
         params = {"location": location, "radius": radius, "extensions": "all"}
         if keywords:
             params["keywords"] = keywords
@@ -323,10 +386,20 @@ class UnifiedAMapClient:
         return []
 
     async def find_train_stations(self, location: str, radius: int = 15000) -> List[Dict]:
+        """查找坐标附近的火车站（POI 类型 150200，多关键词合并去重）。
+
+        Args:
+            location: 中心坐标 "lng,lat"
+            radius: 搜索半径（米），默认 15000
+
+        Returns:
+            去重后的车站 POI 列表，按距离升序；无结果返回空列表。
+        """
         poi_type = "150200"
         keyword_list = ["火车站", "高铁站", "城际站"]
         all_stations = []
 
+        # 先逆地理编码拿城市名，帮助高德更精确地圈定搜索范围
         city_name = ""
         try:
             addr_info = await self.regeocode(location)
@@ -350,6 +423,7 @@ class UnifiedAMapClient:
             if data and data.get("status") == "1":
                 all_stations.extend(data.get("pois", []))
 
+        # 多关键词结果去重（仅保留名称含「站」的项）
         unique = []
         name_set = set()
         for item in all_stations:

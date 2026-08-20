@@ -42,6 +42,15 @@ ROUTE_SYSTEM_PROMPT = """\
 
 
 class RouteAgent(BaseAgent):
+    """路线规划 Agent：处理 route / travel 的路线子任务。
+
+    授权工具（由 graph 初始化时按名注入，缺失会触发 _validate_tools 快速失败）：
+    - amap_geocode：地址 → 坐标
+    - amap_regeocode：坐标 → 城市（起点为 GPS 时反解城市名）
+    - amap_route_planning：驾车/公交/火车路线规划（mode=auto 按距离择优）
+    - py12306_query_train_schedule：跨城火车班次查询
+    """
+
     def __init__(self, llm_client: LLMClient, tools=None):
         super().__init__(
             llm_client=llm_client,
