@@ -16,6 +16,7 @@ except ImportError:
 
 from .client import UnifiedAMapClient
 from .route_planner import RoutePlanner
+from .train_crawler import Py12306Client
 
 
 def geocode(address: str) -> str:
@@ -70,7 +71,6 @@ def route_planning(origin: str, destination: str, mode: str = "auto") -> str:
     planner = RoutePlanner(
         amap_key=settings.AMAP_API_KEY,
         enable_train_info=True,
-        enable_static_map=True,
     )
     loop = None
     try:
@@ -87,10 +87,19 @@ def route_planning(origin: str, destination: str, mode: str = "auto") -> str:
         asyncio.set_event_loop(loop)
         return loop.run_until_complete(_do())
     except Exception as e:
-        return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
+        return json.dumps({"success": False, "error_code": "ROUTE_PLAN_FAILED",
+                           "error": str(e)}, ensure_ascii=False)
     finally:
         if loop:
             loop.close()
+        # 会话保活（P0-V2 #2）后，独立脚本创建的客户端需显式关闭，避免 aiohttp 会话泄漏
+        try:
+            if planner and planner.train_client:
+                asyncio.run(planner.train_client.close())
+            if planner and planner.amap:
+                asyncio.run(planner.amap.close())
+        except Exception:
+            pass
 
 
 def query_train_schedule(from_station: str, to_station: str, date: Optional[str] = None) -> str:
@@ -110,36 +119,27 @@ def query_train_schedule(from_station: str, to_station: str, date: Optional[str]
     planner = RoutePlanner(
         amap_key=settings.AMAP_API_KEY,
         enable_train_info=True,
-        enable_static_map=True,
     )
     loop = None
     try:
 
         async def _do():
-            start_loc = await planner.amap.geocode(from_station) if from_station else None
-            end_loc = await planner.amap.geocode(to_station)
-            city_station_map = {
-                "北京": "北京南",
-                "上海": "上海虹桥",
-                "天津": "天津",
-                "重庆": "重庆北",
-                "广州": "广州南",
-                "深圳": "深圳北",
-                "杭州": "杭州东",
-                "南京": "南京南",
-                "武汉": "武汉",
-                "成都": "成都东",
-                "西安": "西安北",
-                "济南": "济南西",
-                "长沙": "长沙南",
-                "郑州": "郑州东",
-            }
-            station_from = city_station_map.get(from_station, from_station) if from_station else from_station
-            station_to = city_station_map.get(to_station, to_station) if to_station else to_station
+            # 显示用车站名：城市 → 主要车站（单一来源 Py12306Client.CITY_STATION_MAP）
+            station_map = Py12306Client.CITY_STATION_MAP
+            station_from = station_map.get(from_station, from_station) if from_station else from_station
+            station_to = station_map.get(to_station, to_station) if to_station else to_station
             schedule = await planner._get_train_schedule(date, station_from, station_to)
             if not schedule or not schedule.get("trains"):
+                err = schedule.get("error") if isinstance(schedule, dict) else None
+                err_code = schedule.get("error_code") if isinstance(schedule, dict) else None
                 return json.dumps(
-                    {"success": False, "error": "未查询到班次", "trains": [], "total_trains": 0},
+                    {
+                        "success": False,
+                        "error": err or "未查询到班次",
+                        "error_code": err_code or "NO_TRAINS",
+                        "trains": [],
+                        "total_trains": 0,
+                    },
                     ensure_ascii=False,
                 )
             result = {
@@ -155,7 +155,16 @@ def query_train_schedule(from_station: str, to_station: str, date: Optional[str]
         asyncio.set_event_loop(loop)
         return loop.run_until_complete(_do())
     except Exception as e:
-        return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
+        return json.dumps({"success": False, "error_code": "TRAIN_QUERY_FAILED",
+                           "error": str(e)}, ensure_ascii=False)
     finally:
         if loop:
             loop.close()
+        # 会话保活（P0-V2 #2）后，独立脚本创建的客户端需显式关闭，避免 aiohttp 会话泄漏
+        try:
+            if planner and planner.train_client:
+                asyncio.run(planner.train_client.close())
+            if planner and planner.amap:
+                asyncio.run(planner.amap.close())
+        except Exception:
+            pass

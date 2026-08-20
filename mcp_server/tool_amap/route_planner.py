@@ -9,11 +9,18 @@
 4. 第三段显示从到达站到目的地
 """
 import logging
-from datetime import datetime
+import re
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 from .client import UnifiedAMapClient
 from .train_crawler import Py12306Client
-from .utils import estimate_train_cost, format_duration, format_distance, format_cost
+from .utils import (
+    estimate_train_cost,
+    estimate_train_cost_by_distance,
+    format_duration,
+    format_distance,
+    format_cost,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,10 +35,11 @@ class RoutePlanningResult:
         self.total_cost = 0.0  # CNY
         self.walking_distance = 0.0  # meters
         self.route_details = []
-        self.static_map_url = None
         self.train_info = None
         self.error = None
+        self.warning = None  # 非致命降级说明（如火车信息不可用改用占位数据）
         self.raw_response = None
+        self.segment_cost_note = None  # 市内接驳费用口径说明（P1-V2 #5）
         # ✅ 新增：三段式详细信息
         self.segment_1 = {}  # 市内到出发站
         self.segment_2 = {}  # 火车段
@@ -45,9 +53,10 @@ class RoutePlanningResult:
             "total_cost": round(self.total_cost, 2),
             "walking_distance": round(self.walking_distance, 0),
             "route_details": self.route_details,
-            "static_map_url": self.static_map_url,
             "train_info": self.train_info,
             "error": self.error,
+            "warning": self.warning,
+            "segment_cost_note": self.segment_cost_note,
             "segment_1": self.segment_1,
             "segment_2": self.segment_2,
             "segment_3": self.segment_3,
@@ -64,8 +73,6 @@ class RoutePlanningResult:
         ]
         if self.walking_distance > 0:
             lines.append(f"Walking: {self.walking_distance:.0f}m")
-        if self.static_map_url:
-            lines.append(f"Map: {self.static_map_url}")
         if self.train_info:
             lines.append(f"\nTrain Info:")
             train = self.train_info
@@ -81,12 +88,21 @@ class RoutePlanningResult:
 class RoutePlanner:
     """智能路径规划器 - 火车路线修复版"""
 
-    def __init__(self, amap_key: str = None, enable_train_info: bool = True, enable_static_map: bool = True):
-        self.amap_key = amap_key
-        self.enable_train_info = enable_train_info and bool(amap_key)
-        self.enable_static_map = enable_static_map and bool(amap_key)
+    def __init__(self, amap_key: str = None, enable_train_info: bool = True,
+                 amap_client: Optional[UnifiedAMapClient] = None):
+        """智能路径规划器 - 火车路线修复版
 
-        if amap_key:
+        Args:
+            amap_key: 高德 API Key（未传 amap_client 时用于创建客户端）
+            enable_train_info: 是否启用 12306 火车班次查询
+            amap_client: 外部传入的共享 UnifiedAMapClient（复用会话，避免连接泄漏）
+        """
+        self.amap_key = amap_key
+        self.enable_train_info = enable_train_info and bool(amap_key or amap_client)
+
+        if amap_client is not None:
+            self.amap = amap_client
+        elif amap_key:
             self.amap = UnifiedAMapClient(api_key=amap_key)
         else:
             self.amap = None
@@ -121,7 +137,19 @@ class RoutePlanner:
         elif transport_mode == "transit":
             return await self._plan_transit_route(start, end, start_loc, end_loc, "0")
         else:
-            return await self._plan_train_route(start, end, start_loc, end_loc, date, user_real_location)
+            # auto：>120km 优先火车；短途在驾车/公交间按耗时择优
+            if self._should_use_train(start_loc, end_loc):
+                return await self._plan_train_route(start, end, start_loc, end_loc, date, user_real_location)
+            driving = await self._plan_driving_route(start, end, start_loc, end_loc)
+            transit = await self._plan_transit_route(start, end, start_loc, end_loc, "0")
+            if driving.error and transit.error:
+                # 短途两种方式都失败：回退火车规划（尽力而为）
+                return await self._plan_train_route(start, end, start_loc, end_loc, date, user_real_location)
+            if driving.error:
+                return transit
+            if transit.error:
+                return driving
+            return driving if driving.total_duration <= transit.total_duration else transit
 
     def _clean_end_name(self, end: str) -> str:
         """清洗终点名称 - 强净化，剔除无用后缀、剔除站字"""
@@ -177,6 +205,37 @@ class RoutePlanner:
             name = name + "站"
         return name
 
+    async def _geocode_station(self, station_name: str, city: str = None) -> Optional[str]:
+        """车站地理编码（带重试链）：原样 → +站 → 带城市 → POI 搜索兜底。
+
+        高德对无城市上下文的站名（如"北京南"）编码经常失败，逐步加上下文重试。
+        """
+        if not station_name:
+            return None
+
+        candidates = [station_name]
+        if not station_name.endswith("站"):
+            candidates.append(station_name + "站")
+        for cand in candidates:
+            loc = await self.amap.geocode(cand)
+            if loc:
+                return loc
+
+        if city and city != station_name:
+            for cand in (f"{city}{station_name}", f"{city}市{station_name}站"):
+                loc = await self.amap.geocode(cand)
+                if loc:
+                    return loc
+
+        # POI 搜索兜底
+        try:
+            pois = await self.amap.search_poi(station_name, city=city or None)
+            if pois:
+                return pois[0].get("location")
+        except Exception as e:
+            logger.warning(f"车站 POI 兜底失败 {station_name}: {e}")
+        return None
+
     async def _plan_train_route(self, start: str, end: str, start_loc: str, end_loc: str,
                                 date: str, user_real_location: str = None) -> "RoutePlanningResult":
         """
@@ -188,6 +247,8 @@ class RoutePlanner:
         """
         result = RoutePlanningResult()
         result.transport_mode = "Train Travel"
+        # P1-V2 #5：总费用中市内段按驾车费率估算，明确标注口径，避免误导
+        result.segment_cost_note = "市内接驳（按驾车估算）"
 
         try:
             # ==================== 1. 确定起点类型和坐标 ====================
@@ -209,19 +270,8 @@ class RoutePlanner:
                 real_start_loc = start_loc
                 logger.info(f"📍 无起点，使用默认坐标: {real_start_loc}")
 
-            # ==================== 2. 车站映射表 ====================
-            city_station_map = {
-                "北京": "北京南", "上海": "上海虹桥",
-                "天津": "天津", "重庆": "重庆北",
-                "广州": "广州南", "深圳": "深圳北",
-                "杭州": "杭州东", "南京": "南京南",
-                "武汉": "武汉", "成都": "成都东",
-                "西安": "西安北", "济南": "济南西",
-                "长沙": "长沙南", "郑州": "郑州东",
-                "沈阳": "沈阳北", "大连": "大连",
-                "青岛": "青岛", "厦门": "厦门",
-                "苏州": "苏州", "宁波": "宁波",
-            }
+            # ==================== 2. 车站映射表（单一来源：Py12306Client.CITY_STATION_MAP） ====================
+            city_station_map = Py12306Client.CITY_STATION_MAP
 
             # ==================== 3. 确定起点站 ====================
             start_station_location = None
@@ -229,7 +279,7 @@ class RoutePlanner:
             if has_start and start in city_station_map:
                 # 有起点且在映射表：直接用映射的车站
                 train_station_from = city_station_map[start]
-                start_station_location = await self.amap.geocode(train_station_from)
+                start_station_location = await self._geocode_station(train_station_from, city=start)
                 logger.info(f"🏙️ 起点城市映射: {start} -> {train_station_from} ({start_station_location})")
             else:
                 # 无起点 或 不在映射表：搜索附近车站
@@ -281,7 +331,7 @@ class RoutePlanner:
             # 尝试获取终点车站到终点市中心的距离
             seg3_dist = 15.0
             seg3_dur = 30.0
-            end_station_loc = await self.amap.geocode(train_station_to)
+            end_station_loc = await self._geocode_station(train_station_to, city=end_clean)
             if end_station_loc and end_loc:
                 route3 = await self.amap.driving_route(end_station_loc, end_loc)
                 if route3 and route3.get("status") == "1":
@@ -295,15 +345,18 @@ class RoutePlanner:
             if train_info and train_info.get("success") and train_info["trains"]:
                 best_train = train_info["trains"][0]
                 result.train_info = best_train
-                try:
-                    train_cost = float(best_train['second_class']) if str(best_train['second_class']).replace('.','').isdigit() else 0
-                except:
-                    train_cost = estimate_train_cost(start_station_location, end_loc)
+                train_cost = self._resolve_train_cost(best_train, start_station_location, end_loc)
                 logger.info(f"🚄 查询到 {len(train_info['trains'])} 趟列车")
             else:
-                result.train_info = self._create_default_train_info(train_station_from, train_station_to)
+                reason = (train_info or {}).get("error") or "火车信息查询失败"
+                # P1-V2 #3：占位数据按起终点直线距离动态生成（时长≈距离/250km/h、分级票价），不再用固定 "4-6 hours"
+                result.train_info = self._create_default_train_info(
+                    train_station_from, train_station_to, distance_km=city_distance
+                )
+                result.train_info["placeholder"] = True
+                result.warning = f"火车班次查询失败，已使用估算占位数据：{reason}"
                 train_cost = estimate_train_cost(start_station_location, end_loc)
-                logger.warning("⚠️ 未查询到火车信息，使用默认值")
+                logger.warning(f"⚠️ 未查询到火车信息，使用估算占位数据: {reason}")
 
             # ==================== 7. 计算总费用/距离/时长 ====================
             train_duration_min = self._parse_train_duration(result.train_info.get("duration", "0")) if result.train_info else 0
@@ -315,6 +368,10 @@ class RoutePlanner:
             # ==================== 8. 组装三段式结果 ====================
 
             # 第1段：起点 → 起点站
+            if has_start and not start_station_location:
+                seg1_detail = f"从 {segment1_from} 前往 {train_station_from} 的市内段距离暂不可用（估算）"
+            else:
+                seg1_detail = f"从 {segment1_from} 驾车前往 {train_station_from}，约 {seg1_dist:.1f}km，{int(seg1_dur)}分钟"
             result.segment_1 = {
                 "step": 1,
                 "icon": "🚗",
@@ -323,7 +380,8 @@ class RoutePlanner:
                 "to": train_station_from,
                 "distance": seg1_dist,
                 "duration": int(seg1_dur),
-                "detail": f"从 {segment1_from} 驾车前往 {train_station_from}，约 {seg1_dist:.1f}km，{int(seg1_dur)}分钟"
+                "detail": seg1_detail,
+                "cost_note": result.segment_cost_note,
             }
 
             # 第2段：起点站 → 终点站
@@ -347,7 +405,8 @@ class RoutePlanner:
                 "to": end_clean,
                 "distance": seg3_dist,
                 "duration": int(seg3_dur),
-                "detail": f"从 {train_station_to} 驾车前往 {end_clean}市中心，约 {seg3_dist:.1f}km，{int(seg3_dur)}分钟"
+                "detail": f"从 {train_station_to} 驾车前往 {end_clean}市中心，约 {seg3_dist:.1f}km，{int(seg3_dur)}分钟",
+                "cost_note": result.segment_cost_note,
             }
 
             # route_details 文本
@@ -362,7 +421,7 @@ class RoutePlanner:
                 f"  车次: {result.train_info.get('train_number', '查询中')}",
                 f"  时间: {result.train_info.get('departure_time', '--:--')} → {result.train_info.get('arrival_time', '--:--')}",
                 f"  历时: {result.train_info.get('duration', '--')}",
-                f"  票价: {result.train_info.get('second_class', '暂无')}",
+                f"  票价: {self._format_second_class(result.train_info)}",
                 "",
                 f"📍 第3段：市内交通",
                 f"  从 {train_station_to} 到 {end_clean}市中心",
@@ -373,6 +432,7 @@ class RoutePlanner:
                 f"  总距离: {city_distance:.1f}km",
                 f"  总耗时: {format_duration(result.total_duration)}",
                 f"  总费用: {format_cost(result.total_cost)}",
+                f"  ※ 市内段费用口径：{result.segment_cost_note}",
             ]
 
             logger.info("✅ 火车路线规划完成")
@@ -385,30 +445,71 @@ class RoutePlanner:
             logger.error(traceback.format_exc())
             return result
 
+    @staticmethod
+    def _resolve_train_cost(train_info: dict, start_location: str, end_location: str) -> float:
+        """解析火车票价：优先真实票价（price.second_class），否则回退距离估算。
+
+        注意：seats 字段是余票状态（"有"/"无"/数量），**绝不能当票价**。
+        """
+        try:
+            price = train_info.get("price", {}) if isinstance(train_info.get("price"), dict) else {}
+            second = price.get("second_class")
+            if isinstance(second, (int, float)) and second > 0:
+                return float(second)
+        except Exception:
+            pass
+        return estimate_train_cost(start_location, end_location)
+
     def _parse_train_duration(self, duration_str: str) -> int:
-        """解析火车时长字符串为分钟数"""
+        """解析火车时长字符串为分钟数，支持 HH:MM / "4-6 hours" / "4小时30分" 等格式。"""
         try:
             if not duration_str or duration_str == "--":
                 return 0
-            # 处理格式如 "05:53" 或 "5小时53分"
-            if ":" in duration_str:
-                parts = duration_str.split(":")
-                hours = int(parts[0])
-                minutes = int(parts[1])
+            s = str(duration_str).strip().lower()
+            # 格式1：HH:MM，如 "05:53"
+            if ":" in s:
+                parts = s.split(":")
+                if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+                    return int(parts[0]) * 60 + int(parts[1])
+            # 格式2：数字 + 小时单位（区间取较大值），如 "4-6 hours" / "5小时" / "4h"
+            hours = 0
+            m = re.search(r'(\d+)\s*(?:-\s*(\d+))?\s*(?:小时|hour|hours|h|hr|hrs)\b', s)
+            if m:
+                hours = int(m.group(2) or m.group(1))
+            # 格式3：数字 + 分钟单位，如 "30分钟" / "45 min"
+            minutes = 0
+            mm = re.search(r'(\d+)\s*(?:分钟|min|mins|m)\b', s)
+            if mm:
+                minutes = int(mm.group(1))
+            if hours or minutes:
                 return hours * 60 + minutes
+            # 格式4：纯数字（视为分钟）
+            if s.isdigit():
+                return int(s)
             return 0
-        except:
+        except Exception:
             return 0
 
+    @staticmethod
+    def _format_second_class(train_info: dict) -> str:
+        """二等座展示：优先真实票价（¥xx），其次余票状态。"""
+        if not train_info:
+            return "--"
+        price = train_info.get("price", {}) if isinstance(train_info.get("price"), dict) else {}
+        second_price = price.get("second_class")
+        if isinstance(second_price, (int, float)):
+            return f"¥{second_price:.0f}"
+        return train_info.get("second_class", "--")
+
     def _format_train_detail(self, train_info: dict) -> str:
-        """格式化火车详情"""
+        """格式化火车详情（优先展示真实票价，其次余票状态）"""
         if not train_info:
             return "暂无火车信息"
         return (
             f"车次: {train_info.get('train_number', '待查询')}\n"
             f"时间: {train_info.get('departure_time', '--:--')} → {train_info.get('arrival_time', '--:--')}\n"
             f"历时: {train_info.get('duration', '--')}\n"
-            f"二等座: {train_info.get('second_class', '--')}"
+            f"二等座: {self._format_second_class(train_info)}"
         )
 
     def _calculate_straight_distance(self, start_loc: str, end_loc: str) -> float:
@@ -507,7 +608,14 @@ class RoutePlanner:
         return result
 
     async def _get_train_schedule(self, date: str, from_station: str, to_station: str) -> Optional[Dict]:
-        """使用 Py12306Client 异步查询火车时刻表 - 手动管理 session"""
+        """使用 Py12306Client 异步查询火车时刻表 - 会话进程内保活
+
+        失败时返回携带 error / error_code 的结果字典（不再吞掉原因），
+        仅当 Py12306Client 未启用时返回 None。
+
+        会话保活（P0-V2 #2）：不再每次调用后 close()，避免重建 TCP/TLS 握手；
+        由进程级 atexit（async_wrappers.close_shared_clients）统一关闭，防泄漏。
+        """
         if not self.enable_train_info or not self.train_client:
             logger.warning("⚠️ Py12306Client 未启用，跳过火车查询")
             return None
@@ -516,7 +624,7 @@ class RoutePlanner:
             if not self.train_client.session:
                 await self.train_client._init_session()
 
-            # ✅ 直接调用查询方法
+            # ✅ 直接调用查询方法（内部 TTL 缓存 + 失败负缓存 + 确定性错误不重试）
             result = await self.train_client.query_train_schedule(
                 date=date,
                 from_station=from_station,
@@ -524,27 +632,50 @@ class RoutePlanner:
                 include_price=True
             )
 
-            # ✅ 查询完成后关闭 session
-            await self.train_client.close()
-
             if result.get("success") and result.get("trains"):
                 logger.info(f"✅ 查询到 {len(result['trains'])} 趟列车: {from_station} → {to_station}")
                 return result
             else:
                 error_msg = result.get("error", "未知错误")
                 logger.warning(f"⚠️ 火车查询未返回数据: {error_msg}")
-                return None
+                return result
 
         except Exception as e:
             logger.error(f"❌ Py12306Client 查询失败: {e}")
-            # ✅ 确保异常时关闭 session
-            try:
-                await self.train_client.close()
-            except:
-                pass
-            return None
+            # 会话保持存活：aiohttp 会话对异常有自愈能力，下次请求自动重连
+            return {"success": False, "error": f"火车查询异常: {str(e)}", "error_code": "QUERY_FAILED"}
 
-    def _create_default_train_info(self, start_station: str, end_station: str) -> Dict:
+    def _create_default_train_info(self, start_station: str, end_station: str,
+                                   distance_km: float = None) -> Dict:
+        """生成占位火车信息（火车班次查询失败时的降级数据）。
+
+        P1-V2 #3：给定起终点直线距离时按「时长 ≈ 距离/250km/h、二等座 ≈ 分级费率×距离」动态生成，
+        并标注"估算值"；距离未知时回退静态占位（兼容旧调用方）。
+        """
+        if distance_km and distance_km > 0:
+            duration_min = max(30, int(round(distance_km / 250.0 * 60)))
+            second_price = estimate_train_cost_by_distance(distance_km)
+            dep = datetime.strptime("08:00", "%H:%M")
+            arr = dep + timedelta(minutes=duration_min)
+
+            def _fmt_price(price: float) -> str:
+                return f"≈{int(round(price / 10) * 10)} CNY"
+
+            return {
+                "train_number": "Check 12306",
+                "departure_time": dep.strftime("%H:%M"),
+                "arrival_time": arr.strftime("%H:%M"),
+                "duration": format_duration(duration_min),
+                "second_class": _fmt_price(second_price),
+                "first_class": _fmt_price(second_price * 1.6),
+                "soft_sleeper": _fmt_price(second_price * 1.8),
+                "hard_sleeper": _fmt_price(second_price * 1.4),
+                "hard_seat": _fmt_price(second_price * 0.55),
+                "estimated": True,
+                "note": (f"估算值：按直线距离 {distance_km:.0f}km 估算"
+                         f"（约 {duration_min} 分钟，二等座 {_fmt_price(second_price)}），"
+                         f"实际以 12306 为准：{start_station}→{end_station}"),
+            }
         return {
             "train_number": "Check 12306",
             "departure_time": "08:00",

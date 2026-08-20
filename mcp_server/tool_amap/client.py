@@ -63,7 +63,9 @@ class UnifiedAMapClient:
         # "xxxxxx",
         # "yyyyyy"
     ]
-    GEO_CACHE = {}        # 全局地址/坐标缓存
+    GEO_CACHE = {}        # 全局地址/坐标缓存：key -> (timestamp, value)
+    GEO_CACHE_TTL = 24 * 3600   # 缓存有效期 24 小时
+    GEO_CACHE_MAX = 2048        # 最大条目，防止长驻进程无界增长
     LAST_API_CALL = 0     # 上一次请求时间戳
     MIN_INTERVAL = 0.4    # 最小请求间隔 0.4秒，压制QPS
     key_index = 0         # key轮询下标
@@ -83,6 +85,24 @@ class UnifiedAMapClient:
         if wait_sec > 0:
             await asyncio.sleep(wait_sec)
         self.LAST_API_CALL = time.time()
+
+    def _cache_get(self, key: str):
+        """带 TTL 的缓存读取（过期自动淘汰）"""
+        item = self.GEO_CACHE.get(key)
+        if item is None:
+            return None
+        ts, value = item
+        if time.time() - ts < self.GEO_CACHE_TTL:
+            return value
+        self.GEO_CACHE.pop(key, None)
+        return None
+
+    def _cache_set(self, key: str, value):
+        """缓存写入（超限时淘汰最旧条目，防止无界增长）"""
+        if len(self.GEO_CACHE) >= self.GEO_CACHE_MAX:
+            oldest_key = min(self.GEO_CACHE, key=lambda k: self.GEO_CACHE[k][0])
+            self.GEO_CACHE.pop(oldest_key, None)
+        self.GEO_CACHE[key] = (time.time(), value)
     # ===================================================================================
 
     def __init__(self, api_key: Optional[str] = None):
@@ -146,8 +166,9 @@ class UnifiedAMapClient:
     async def geocode(self, address: str, city: str = None) -> Optional[str]:
         """地址 → 经纬度坐标（带城市，必解析成功）"""
         cache_key = f"geo_{address}_{city}"
-        if cache_key in self.GEO_CACHE:
-            return self.GEO_CACHE[cache_key]
+        cached = self._cache_get(cache_key)
+        if cached is not None:
+            return cached
 
         try:
             if city:
@@ -158,7 +179,7 @@ class UnifiedAMapClient:
 
             if data and data.get("status") == "1" and data.get("geocodes"):
                 location = data["geocodes"][0]["location"]
-                self.GEO_CACHE[cache_key] = location
+                self._cache_set(cache_key, location)
                 return location
 
             logger.warning(f"地理编码失败: {address}")
@@ -172,8 +193,9 @@ class UnifiedAMapClient:
         逆地理编码：坐标转地址（带缓存）
         """
         cache_key = f"regeo_{location}"
-        if cache_key in self.GEO_CACHE:
-            return self.GEO_CACHE[cache_key]
+        cached = self._cache_get(cache_key)
+        if cached is not None:
+            return cached
 
         # 🔥 修复：只校验坐标格式，不拦截正常地址
         try:
@@ -211,7 +233,7 @@ class UnifiedAMapClient:
                 "street_number": address_component.get("streetNumber", ""),
                 "business_areas": regeocode.get("businessAreas", []),
             }
-            self.GEO_CACHE[cache_key] = res
+            self._cache_set(cache_key, res)
             return res
 
         logger.warning(f"逆地理编码失败: {data.get('info', '')}")
