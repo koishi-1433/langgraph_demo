@@ -19,7 +19,6 @@ class LLMClient:
 
     def __init__(self,
                  provider: str = "openai",
-                 model: Optional[str] = None,
                  temperature: float = 0.6,
                  max_tokens: Optional[int] = None
                  ):
@@ -45,7 +44,6 @@ class LLMClient:
                 api_key=settings.NVIDIA_API_KEY,
                 base_url=settings.NVIDIA_BASE_URL,
             )
-            logger.info(f"初始化NVIDIA客户端，模型：{self.model}")
         else:
             raise ValueError(f"不支持的提供商：{provider}")
 

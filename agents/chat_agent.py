@@ -1,6 +1,5 @@
 """闲聊 Agent — 通用对话，不授权任何工具"""
 from ..config.llm_client import LLMClient
-from ..config.logger import get_logger
 from .base_agent import BaseAgent
 
 CHAT_SYSTEM_PROMPT = """\

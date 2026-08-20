@@ -42,7 +42,6 @@ class TravelPlanWorkflow:
         self.mcp_tools: list[BaseTool] = []
 
     async def __aenter__(self):
-        from langchain_mcp_adapters.client import MultiServerMCPClient
         from ..config.settings import settings
 
         try:

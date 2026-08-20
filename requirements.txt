@@ -1,0 +1,40 @@
+# ============================================================
+# langgraph_demo 依赖清单
+# 适用 Python 3.12+
+# 安装：pip install -r requirements.txt
+# 版本为保守下限；langchain 生态版本耦合较紧，升级时建议整体升级。
+# ============================================================
+
+# ── Web 服务 ────────────────────────────────────────────────
+fastapi>=0.110
+uvicorn>=0.29
+pydantic>=2.6
+pydantic-settings>=2.2
+python-dotenv>=1.0
+
+# ── LangChain / LangGraph 编排 ──────────────────────────────
+langchain>=0.2
+langchain-core>=0.2
+langchain-openai>=0.1.20
+langgraph>=0.2.30
+langchain-mcp-adapters>=0.1.0
+langchain-tavily>=0.1.0
+
+# ── MCP 工具协议 ────────────────────────────────────────────
+# 代码基于 FastMCP 3.x API（ToolResult 原样透传）
+fastmcp>=3.0
+mcp>=1.2
+
+# ── 异步 HTTP（高德 / 12306）───────────────────────────────
+aiohttp>=3.9
+
+# ── 工具库 ──────────────────────────────────────────────────
+colorlog>=6.8
+tenacity>=8.2
+typing-extensions>=4.9
+
+# ── 测试 ────────────────────────────────────────────────────
+pytest>=8.0
+
+# ── 可选 ────────────────────────────────────────────────────
+# nest_asyncio          # train_crawler.py 同步包装在运行中事件循环内调用时使用

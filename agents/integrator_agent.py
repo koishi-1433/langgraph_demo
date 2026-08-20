@@ -1,6 +1,5 @@
 """整合 Agent — 无工具，仅用 LLM 将攻略 + 路线 整合为自然语言旅行方案"""
 from ..config.llm_client import LLMClient
-from ..config.logger import get_logger
 from .base_agent import BaseAgent
 
 INTEGRATOR_SYSTEM_PROMPT = """\

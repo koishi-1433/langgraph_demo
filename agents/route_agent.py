@@ -1,6 +1,5 @@
 """路线规划 Agent — ReAct，只授权地图和火车班次 MCP 工具"""
 from ..config.llm_client import LLMClient
-from ..config.logger import get_logger
 from .base_agent import BaseAgent
 
 ROUTE_SYSTEM_PROMPT = """\
