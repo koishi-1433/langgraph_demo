@@ -107,7 +107,16 @@ pip install fastapi uvicorn pydantic pydantic-settings python-dotenv \
 
 ### 3. 配置 `.env`
 
-在项目根目录新建 `.env`（**该文件已被 `.gitignore` 排除，切勿提交**）：
+复制根目录的模板并填写密钥（`.env` 已被 `.gitignore` 排除，**切勿提交**）：
+
+```bash
+# Windows
+copy .env.example .env
+# Linux / macOS
+cp .env.example .env
+```
+
+完整变量清单见 [`.env.example`](.env.example)，主要配置如下：
 
 ```dotenv
 # ===== LLM（OpenAI 兼容接口，如 chatanywhere）=====
