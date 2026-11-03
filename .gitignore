@@ -1,15 +1,12 @@
-# 密钥（绝不入库）
-/config/.env
-
-# 日志与缓存
-/logs/
 __pycache__/
-*.pyc
-.pytest_cache/
-
-# 运行时数据
-.chat_memory/
-
-# IDE
+.env
+logs/
 .idea/
-.jbeval/
+
+# RAG 运行时产物与本地模型权重（体积大，勿提交）
+MCP/tool_rag/rag_db/
+MCP/tool_rag/mymodel/
+
+# 会话记忆与验收临时产物（运行时生成，勿提交）
+data/memory/*.json
+_acceptance/

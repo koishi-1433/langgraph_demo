@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>project_mcp 项目总报告 · 架构审计 / 缺陷治理 / 全功能验收 / 优化落地</title>
+<style>
+:root{--bg:#f6f8fb;--card:#fff;--ink:#1f2937;--muted:#6b7280;--line:#e5e7eb;
+--ok:#0f9d58;--bad:#d93025;--skip:#9ca3af;--brand:#1a73e8;--warn:#f9ab00;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+font-family:"Microsoft YaHei","PingFang SC","Helvetica Neue",Arial,sans-serif;
+font-size:14px;line-height:1.7}
+.wrap{max-width:1200px;margin:0 auto;padding:28px 20px 60px}
+header{background:linear-gradient(135deg,#1a73e8,#0b57d0);color:#fff;border-radius:14px;
+padding:26px 30px;margin-bottom:18px}
+header h1{margin:0 0 8px;font-size:25px}
+header .sub{opacity:.92;font-size:13px;line-height:1.9}
+.verdict{display:inline-block;margin-top:14px;background:#fff;color:#0b57d0;
+font-weight:700;padding:8px 18px;border-radius:999px;font-size:15px}
+.meta{width:100%;border-collapse:collapse;margin-top:14px;font-size:12.5px}
+.meta td{border-top:1px solid rgba(255,255,255,.25);padding:5px 10px 5px 0;vertical-align:top}
+.meta td:first-child{opacity:.75;width:92px;white-space:nowrap}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:18px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:15px;text-align:center}
+.card .v{font-size:25px;font-weight:700;color:var(--brand)}
+.card .l{color:var(--muted);font-size:12px;margin-top:2px}
+.card.ok .v{color:var(--ok)} .card.warn .v{color:var(--warn)}
+section{background:var(--card);border:1px solid var(--line);border-radius:12px;
+padding:20px 24px;margin-bottom:18px}
+h2{font-size:18px;margin:0 0 14px;padding-left:10px;border-left:4px solid var(--brand)}
+h3{font-size:15px;margin:20px 0 9px;color:#374151}
+p{margin:9px 0}
+.muted{color:var(--muted);font-weight:400;font-size:12px}
+table.t{width:100%;border-collapse:collapse;font-size:12.5px;margin:8px 0 4px}
+table.t th,table.t td{border:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top}
+table.t th{background:#f1f5f9;font-weight:600}
+table.t tr:nth-child(even) td{background:#fcfdff}
+td.num{text-align:right;white-space:nowrap}
+td.cid{font-family:Consolas,monospace;white-space:nowrap}
+td.note{color:var(--muted);font-size:11.5px}
+.num.ok{color:var(--ok);font-weight:600} .num.bad{color:var(--bad);font-weight:600}
+.chip{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:700;color:#fff;white-space:nowrap}
+.chip.ok{background:var(--ok)} .chip.part{background:var(--warn)} .chip.todo{background:#94a3b8}
+.chip.bad{background:var(--bad)} .chip.low{background:#f9ab00}
+pre{background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:14px 16px;
+overflow-x:auto;font-family:Consolas,"Courier New",monospace;font-size:12px;line-height:1.65;color:#334155;margin:10px 0}
+code{background:#f1f5f9;padding:1px 5px;border-radius:4px;font-size:11.5px;
+font-family:Consolas,"Courier New",monospace}
+.box{border-radius:9px;padding:12px 16px;margin:12px 0;font-size:13px}
+.box.warn{background:#fff8e1;border:1px solid #ffe082;border-left:5px solid var(--warn)}
+.box.info{background:#eef4ff;border:1px solid #c9dcff;border-left:5px solid var(--brand)}
+.box.good{background:#e8f5e9;border:1px solid #b7e1c0;border-left:5px solid var(--ok)}
+.box b{color:#111827}
+ul{margin:8px 0;padding-left:22px} li{margin-bottom:5px;font-size:13px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:820px){.grid2{grid-template-columns:1fr}}
+footer{color:var(--muted);font-size:12px;text-align:center;margin-top:24px;line-height:1.9}
+.toc{font-size:12.5px;color:var(--muted)}
+.toc a{color:var(--brand);text-decoration:none;margin-right:12px;white-space:nowrap}
+</style></head><body><div class="wrap">
+
+<header>
+  <h1>project_mcp 项目总报告</h1>
+  <div class="sub">架构审计 · 缺陷治理 · 全功能验收 · 优化落地<br>
+  项目路径 <code style="background:rgba(255,255,255,.18);color:#fff">D:\workspace\project_mcp</code> ·
+  环境 Miniconda myenv312 / Python 3.12.12 · 报告日期 2026-11-03</div>
+  <table class="meta">
+    <tr><td>覆盖周期</td><td>2026-11-03 全天，共 10 个阶段：审计 → 迁移 → 修复 → 接入 → 验收 → 优化 → 落地</td></tr>
+    <tr><td>报告性质</td><td>整合型总报告：合并此前 4 份专项报告的全部结论、证据与状态，并更新至最终代码状态</td></tr>
+    <tr><td>数据来源</td><td>分析诊断报告、Bug 修复建议、全功能验收报告、优化建议方案 + 最终源码实测</td></tr>
+    <tr><td>密钥处理</td><td>全文不展示 .env 中任何真实密钥值</td></tr>
+  </table>
+  <div class="verdict">最终结论：通过（Pass） · 可交付运行</div>
+</header>
+
+<div class="toc" style="margin-bottom:16px">
+  <a href="#s0">0 执行摘要</a><a href="#s1">1 架构</a><a href="#s2">2 工作历程</a>
+  <a href="#s3">3 缺陷全景</a><a href="#s4">4 验收与回归</a><a href="#s5">5 当前状态</a>
+  <a href="#s6">6 风险与建议</a><a href="#s7">7 附录</a>
+</div>
+
+<div class="cards">
+  <div class="card"><div class="v">53</div><div class="l">Python 文件 / 8,919 行</div></div>
+  <div class="card"><div class="v">8</div><div class="l">MCP 工具（+2 prompts +1 resource）</div></div>
+  <div class="card"><div class="v">80</div><div class="l">验收用例 / 95.0%</div></div>
+  <div class="card ok"><div class="v">26/26</div><div class="l">修复后回归通过</div></div>
+  <div class="card ok"><div class="v">5/5</div><div class="l">验收缺陷全部修复</div></div>
+  <div class="card ok"><div class="v">0</div><div class="l">编译错误 / 异常 / 403 日志</div></div>
+</div>
+
+<div class="box info"><b>阅读口径</b>：本报告是唯一权威快照。此前 4 份专项报告记录各自时点的中间状态（如「剩余 25 项」「有条件通过」「未修改源码」），均已过时；状态冲突时以本报告为准。</div>
+
+<section id="s0">
+<h2>0. 执行摘要</h2>
+<p>项目从<strong>「默认启动 100% 失败、输出伪造车次与零换行文本、退出抛异步异常」</strong>的不可交付状态，经过 10 个阶段的治理，已达到<strong>「可独立运行、干净退出、数据不伪造、8 个 MCP 工具全通、80 用例验收 95% 通过、验收发现的 5 项缺陷全部修复并回归通过」</strong>的可交付状态。剩余事项均为工程化增强与安全加固，不阻断交付与运行。</p>
+
+<h3>0.1 关键指标演进</h3>
+<table class="t">
+<tr><th>指标</th><th>阶段 1（初始审计）</th><th>阶段 8（全功能验收）</th><th>最终状态（阶段 10 后）</th></tr>
+<tr><td>默认入口 <code>main.py</code></td><td>失败（LLM 404 / 429）</td><td>EXIT 0</td><td class="num ok">EXIT 0，异常 0 / 403 日志 0</td></tr>
+<tr><td>MCP 工具数</td><td class="num">4</td><td class="num">8</td><td class="num ok">8（+2 prompts +1 resource）</td></tr>
+<tr><td>输出格式</td><td>零换行、控制字符、假日期</td><td>正常</td><td class="num ok">正常，日期动态生成</td></tr>
+<tr><td>路线数据</td><td><code>Check 12306 / 08:00→14:00 / 300-600 CNY</code> 伪造且 <code>success=True</code></td><td><code>data_quality=partial</code> 显式标注</td><td class="num ok">质量字段贯通前端 + 代码强制免责声明</td></tr>
+<tr><td>RAG</td><td>全项目引用 0 次（孤岛）</td><td>已接入，<code>rag:hits=4</code></td><td class="num ok">已接入且不自回显（<code>rag:no_hits</code>）</td></tr>
+<tr><td>远程 MCP</td><td>传输模式分裂</td><td>SSE 分支不可用（DEF-03）</td><td class="num ok">Streamable HTTP 实测可用</td></tr>
+<tr><td>验收用例</td><td>—</td><td>80 / 76 PASS / 3 FAIL / 1 SKIP / 95.0%</td><td class="num ok">3 项 FAIL 全修复；回归 26/26</td></tr>
+<tr><td>Python 文件 / 行数</td><td class="num">48 / 7,389</td><td class="num">53 / ~8,900</td><td class="num">53 / 8,919</td></tr>
+<tr><td><code>.env</code> 键数</td><td class="num">~37（含 10 个废弃键）</td><td class="num">37</td><td class="num ok">27（废弃键清理完毕）</td></tr>
+<tr><td>全量 <code>compileall</code></td><td>0 错误</td><td>0 错误</td><td class="num ok">0 错误</td></tr>
+</table>
+
+<h3>0.2 阶段成果速览</h3>
+<table class="t">
+<tr><th>#</th><th>阶段</th><th>核心产出</th></tr>
+<tr><td class="cid">1</td><td>架构审计与运行诊断</td><td>48 个 .py / 7,389 行盘点；29 项问题（4 P0 / 12 P1 / 8 P2 / 5 P3）与三阶段路线图</td></tr>
+<tr><td class="cid">2</td><td>LLM 迁移</td><td>唯一出口 <code>LLMClientFactory</code> 切到 <code>CHATGPT_FREE_API_KEY</code>，5 个 Agent 零改动全局生效</td></tr>
+<tr><td class="cid">3</td><td>修复 3 个 P0</td><td>恢复 memory/web；统一同进程 <code>MCPAdapter</code>；消除 cancel scope 崩溃</td></tr>
+<tr><td class="cid">4</td><td>数据真实性</td><td>删除假车次、引入质量字段、质检硬门槛、动态日期、会话关闭</td></tr>
+<tr><td class="cid">5</td><td>输出格式 + 意图/地名</td><td>3 处 join 修复、加粗反向引用、空行正则；结构化意图解析；替换汉字黑名单</td></tr>
+<tr><td class="cid">6</td><td>嵌入模型离线化</td><td>删除在线 DashScope 嵌入，指向 <code>tool_rag/mymodel</code>，离线真实加载 bge-m3 / bce</td></tr>
+<tr><td class="cid">7</td><td>RAG 接入主程序</td><td>新增 <code>rag_service.py</code> + 4 个 <code>rag_*</code> 工具，工作流 RAG 节点真正消费检索结果</td></tr>
+<tr><td class="cid">8</td><td>全功能验收</td><td>80 用例 / 95.0% / 「有条件通过」；发现 DEF-01~05、OBS-01~05</td></tr>
+<tr><td class="cid">9</td><td>优化建议</td><td>10 项 OPT，复核修正 3 个根因结论，实测 streamable-http 可行</td></tr>
+<tr><td class="cid">10</td><td>按方案实际修改</td><td>3 批次落地 OPT-01~06，26/26 回归、远程 HTTP 实测、真实 E2E、<code>main.py</code> EXIT 0</td></tr>
+</table>
+</section>
+
+<section id="s1">
+<h2>1. 项目定位与最终架构</h2>
+<p>面向中文旅游场景的<strong>智能旅游助手</strong>：以 Model Context Protocol 为工具总线、LangGraph 为编排引擎，串联「意图识别 → 路由决策 → 工具调用 → 结果整合」，对外提供 CLI（<code>main.py</code>）、FastAPI/SSE（<code>frontend_api.py</code>）与 MCP 服务三种入口。</p>
+<p class="muted">实测技术栈：Python 3.12.12 · FastMCP 3.2.4 · LangGraph 1.1.10 · langchain-openai 1.1.11 · langchain-chroma 1.1.0 · chromadb 1.5.5 · FastAPI 0.136.0 · pydantic 2.13.3 · aiohttp / tenacity / httpx-sse。17 项关键依赖在 myenv312 中全部存在。</p>
+
+<h3>1.1 最终分层架构</h3>
+<pre>入口层     main.py(CLI) | frontend_api.py(FastAPI/SSE) | start_mcp.bat + server.py(MCP 服务)
+   ↓
+编排层     workflow/graph.py(StateGraph) + state.py(WorkflowState / AgentResponse)
+   ↓
+智能体层   intent_recognizer | search_agent | route_agent | travel_agent | rag_agent
+   ↓
+集成层     integration/tool_adapter.py(MCPAdapter 单例，引用计数 + call_tool 统一入口)
+           protocol/client.py(同进程直连 / Streamable HTTP 双模式)
+   ↓
+协议层     protocol/server.py：8 tools / 2 prompts / 1 resource
+   ↓
+能力层     tool_amap/(高德 + 12306) | tool_rag/(本地 bge-m3 + Chroma) | core/(LLM/日志) | config/(Settings)</pre>
+<div class="box info"><b>相对初始架构的三处结构性变化</b>
+<ul>
+<li><b>删掉第二条 MCP 链路</b>：RouteAgent / TravelAgent 不再自建 SSE，全部注入同一个 <code>MCPAdapter</code>；建连/断连各恰好 1 次。</li>
+<li><b>新增 RAG 服务层</b>：<code>rag_service.py</code> 单例（懒加载、线程安全、优雅降级）→ <code>TravelRAG</code> → Chroma 持久化，由 4 个 MCP 工具暴露。</li>
+<li><b>远程传输统一</b>：默认同进程；<code>MCP_HTTP_URL</code> 非空时切到 <code>transport="streamable-http"</code>，端点 <code>/mcp</code>。</li>
+</ul></div>
+
+<h3>1.2 主链路数据流</h3>
+<pre>用户输入 → intent_recognition(LLM，标签行结构化解析) → 条件路由
+  ├ chat   → chat_response(LLM) → END
+  ├ search → Search(Tavily + LLM 攻略)
+  │          → rag 节点【先检索历史知识 → 再把本篇攻略入库】
+  │          → 命中片段原文直出、追加到 final_output → END
+  ├ route  → RouteAgent → MCPAdapter.call_tool('route_planning')
+  │          → 高德 + 12306（失败诚实降级为「暂不可用」+ 距离估算） → END
+  └ travel → TravelAgent = Search + RouteAgent + LLM 整合
+             → 质量字段透传 + 代码强制免责声明 → END
+                 ↓
+        final_output → _clean_final_output() → CLI / /chat / /chat/stream</pre>
+
+<h3>1.3 MCP 工具清单（8 个，全部实测可调）</h3>
+<table class="t">
+<tr><th>工具</th><th>职责</th><th>关键行为</th></tr>
+<tr><td class="cid">web_search</td><td>Tavily 联网检索</td><td>6 组查询 / 5,648 字；兼容 None/list/dict；全失败返回 <code>success=False</code></td></tr>
+<tr><td class="cid">route_planning</td><td>高德 + 12306 路线</td><td>返回 <code>data_quality / is_realtime / warnings / route_available</code>；不伪造车次</td></tr>
+<tr><td class="cid">validate_travel_content</td><td>攻略质检</td><td>伪造痕迹 + 可核查来源 + ≥5 章节 + &gt;800 字硬门槛，一票否决</td></tr>
+<tr><td class="cid">format_sources</td><td>参考来源排版</td><td>多行输出、日期动态</td></tr>
+<tr><td class="cid">rag_add_document</td><td>知识入库</td><td>确定性 ID + Chroma upsert 幂等，重复入库 0 新增</td></tr>
+<tr><td class="cid">rag_query</td><td>语义检索</td><td>L2 距离阈值过滤低相关片段，原文直出</td></tr>
+<tr><td class="cid">rag_stats</td><td>知识库状态</td><td>启用状态、持久化路径、块数等</td></tr>
+<tr><td class="cid">rag_clear</td><td>清空知识库</td><td>必须 <code>confirm=true</code>，否则拒绝</td></tr>
+</table>
+<p class="muted">另有 2 个 prompts（<code>search_prompt</code>、<code>route_prompt</code>）、1 个 resource（<code>travel://standards</code> 旅游信息质量标准）、8 个 LangGraph Tool（当前仅用于日志/测试，未被业务消费）。HTTP 路由：<code>/</code>、<code>/health</code>、<code>/intents</code>、<code>/location</code>、<code>/chat</code>、<code>/chat/stream</code>、<code>/ui</code>、<code>/memory/sessions</code> 系列。</p>
+
+<h3>1.4 配置现状（.env 共 27 个生效键，值均省略）</h3>
+<table class="t">
+<tr><th>分组</th><th>键</th></tr>
+<tr><td>LLM（唯一出口）</td><td class="cid">CHATGPT_FREE_API_KEY / CHATGPT_FREE_BASE_URL / CHATGPT_FREE_MODEL_NAME</td></tr>
+<tr><td>高德</td><td class="cid">AMAP_API_KEY / BASE_URL / GEOCODE_URL / CAR_URL</td></tr>
+<tr><td>搜索</td><td class="cid">TAVILY_API_KEY / TAVILY_MAX_RESULTS</td></tr>
+<tr><td>嵌入（本地离线）</td><td class="cid">EMBEDDING_MODEL_DIR=MCP/tool_rag/mymodel / EMBEDDING_MODEL=bge-m3</td></tr>
+<tr><td>RAG</td><td class="cid">RAG_ENABLED / RAG_PERSIST_DIR / RAG_COLLECTION_NAME / RAG_TOP_K / RAG_MAX_DISTANCE / RAG_CHUNK_SIZE / RAG_CHUNK_OVERLAP</td></tr>
+<tr><td>服务</td><td class="cid">SERVER_HOST / SERVER_PORT / MCP_SERVER_NAME / LANGSMITH_TRACING=false</td></tr>
+<tr><td>策略</td><td class="cid">MAX_REVIEW_ITERATIONS / REVIEW_PASS_SCORE / MAX_RETRIES / MAX_NEWS_ITEMS / LOG_LEVEL</td></tr>
+</table>
+<ul>
+<li>所有生成式 LLM 调用只经 <code>LLMClientFactory</code> → <code>ChatOpenAI</code>（provider <code>chatgpt_free</code>），<code>base_url</code> 自动规范化到 <code>/v1</code>，日志不打印密钥。</li>
+<li>嵌入模型<strong>仅本地离线加载</strong>（<code>HF_HUB_OFFLINE=1</code>）；<code>mymodel/</code> 约 5.4GB（bge-m3 1024 维 / bce 768 维），已加入 <code>.gitignore</code>。</li>
+<li><code>MCP_HTTP_URL</code> 默认空（同进程）；启用远程需先启动 <code>python MCP/protocol/server.py</code>，再放开注释的 <code>MCP_HTTP_URL=http://127.0.0.1:9000/mcp</code> 并<strong>重启进程</strong>（模块导入时固化）。</li>
+<li><code>LANGSMITH_TRACING=false</code> 已生效，实测 403 日志计数 0；清理脚本中 <code>**/.git</code> / <code>**/memory</code> / <code>**/web</code> / <code>**/instruction</code> 删除规则已移除。</li>
+</ul>
+</section>
+
+<section id="s2">
+<h2>2. 全过程工作历程</h2>
+<table class="t">
+<tr><th>阶段</th><th>目标</th><th>关键改动</th><th>验证结果</th></tr>
+<tr><td class="cid">1</td><td>架构审计与运行诊断</td><td>只读：全量编译、逐模块 import、5 类运行场景、MCP 工具直调、纯逻辑探针</td><td>48 .py / 7,389 行；29 项问题；默认启动失败、输出伪造、退出崩溃</td></tr>
+<tr><td class="cid">2</td><td>LLM 改用 CHATGPT_FREE_API_KEY</td><td>settings / llm_client / .env：统一唯一出口、/v1 规范化、密钥占位 fail-fast、provider 别名兼容</td><td>端点实测 200；invoke/ainvoke/astream 全通；main.py EXIT 0（38s），P0-1 关闭</td></tr>
+<tr><td class="cid">3</td><td>先修 3 个 P0</td><td>恢复 memory/ 4 文件与 web/index.html；移除清理脚本危险规则；MCPAdapter 加 _depth 引用计数 + call_tool()；删除手写 SSE 与假 getattr</td><td><b>9000 端口关闭</b>下 EXIT 0 / 21.7s；建连断连各 1 次；无 cancel scope / RuntimeError / Traceback</td></tr>
+<tr><td class="cid">4</td><td>补全数据真实性</td><td>station_names.json（3,365 条）基线；删假车次；新增 data_quality / warnings / is_realtime；format_duration(0)→「暂无数据」；质检硬门槛；Tavily 归一；动态日期；aiohttp 关闭 + QPS 重试上限</td><td>route_planning 1067.29km / 378min / partial / 3 warnings / 无伪造；质检 100 通过、短文与含 Check 12306 一票否决；EXIT 0 / 18.7s</td></tr>
+<tr><td class="cid">5</td><td>批次 B 格式；P1-8 / P1-13</td><td>3 处 "\n".join；r'\1'；'\n{3,}'→'\n\n'；_parse_intent_response()；_looks_like_place() 替换汉字黑名单</td><td>意图 9/9、地名 13/13、路线 5/5；清洗保留文字且无控制字符；format_sources 4 行且日期为当天</td></tr>
+<tr><td class="cid">6</td><td>嵌入模型指向 tool_rag\mymodel</td><td>重写 embedding_manager.py：删 DashScopeEmbeddings / 在线分支 / EmbeddingType；新增别名映射与本地路径校验，禁止静默联网下载</td><td>3 个别名均命中 config.json；离线加载 bge-m3 1024 维 / 5.5s、bce 768 维 / 4.8s，范数 1.0</td></tr>
+<tr><td class="cid">7</td><td>RAG 工具接入主程序</td><td>新增 rag_service.py；travel_rag.py 加 add_text/query_with_scores；server.py 注册 4 个 rag_*；重写 rag_agent.py；state.py 补 rag_text；graph.py 真正追加检索片段</td><td>8 工具全注册；离线入库/去重/跨文档过滤/清空重建全通；RAG_ENABLED=false 不加载模型；真实 search E2E ['search','rag:hits=4']</td></tr>
+<tr><td class="cid">8</td><td>全功能验收 + 报告</td><td>7 分节 80 用例真实调用（不 mock 业务结果），破坏性接口仅验证拒绝路径</td><td>80 / 76 PASS / 3 FAIL / 1 SKIP / 95.0%；「有条件通过」；发现 DEF-01~05 与 OBS-01~05</td></tr>
+<tr><td class="cid">9</td><td>根据缺陷做优化建议</td><td>只读复核 + 一次性探针；修正 3 个根因结论；10 项 OPT 与 3 批路线图</td><td>DEF-04 丢弃点精确定位到 travel_agent.py；streamable-http 探针 OK tools=8 rag_stats_len=331；未改源码</td></tr>
+<tr><td class="cid">10</td><td>按方案实际修改</td><td>① 数据真实性闭环 + RAG 先检索后入库；② FAISS 重载 + Streamable HTTP；③ 直辖市归一、LangSmith 关闭、.env 清理、instruction 恢复、文档同步</td><td>编译 0 错误；桩件 26/26；REMOTE_HTTP OK tools=8；真实 E2E search→rag:no_hits、travel 带 partial/3 warnings/免责声明；EXIT 0、异常 0、403 日志 0</td></tr>
+</table>
+</section>
+
+<section id="s3">
+<h2>3. 缺陷全景与最终状态</h2>
+<p class="muted">状态口径：<span class="chip ok">已修复</span> 代码已改且实测通过 · <span class="chip part">部分</span> 主问题已解、附带项仍存 · <span class="chip todo">遗留</span> 未改动，属增强/加固类。</p>
+
+<h3>3.1 初始审计 29 项（P0 / P1 / P2 / P3）</h3>
+<table class="t">
+<tr><th>编号</th><th>主题</th><th>状态</th><th>说明</th></tr>
+<tr><td class="cid">P0-1</td><td>LLM 模型名 404 / 429 限流</td><td><span class="chip ok">已修复</span></td><td>迁移 CHATGPT_FREE_API_KEY，唯一出口全局生效</td></tr>
+<tr><td class="cid">P0-2</td><td>memory/ web/ 被误删，frontend_api 导入即崩</td><td><span class="chip ok">已修复</span></td><td>恢复 4 个 .py + web/index.html；危险删除规则移除；/memory 与 /ui 恢复</td></tr>
+<tr><td class="cid">P0-3</td><td>SSE 手动 aenter/aexit 导致 cancel scope 崩溃</td><td><span class="chip ok">已修复</span></td><td>统一 MCPAdapter，删除手写 sse_client / ClientSession</td></tr>
+<tr><td class="cid">P0-4</td><td>同进程 / SSE 传输模式分裂</td><td><span class="chip ok">已修复</span></td><td>统一同进程 + MCP_HTTP_URL 配置化；远程改 Streamable HTTP</td></tr>
+<tr><td class="cid">P1-5</td><td>3 处 "".join(lines) 零换行</td><td><span class="chip ok">已修复</span></td><td>"\n".join(lines)</td></tr>
+<tr><td class="cid">P1-6</td><td>加粗被替换成 0x01 控制字符</td><td><span class="chip ok">已修复</span></td><td>替换串改 r'\1'</td></tr>
+<tr><td class="cid">P1-7</td><td>空行压缩正则写错</td><td><span class="chip ok">已修复</span></td><td>r'\n{3,}' → '\n\n'</td></tr>
+<tr><td class="cid">P1-8</td><td>意图全文子串匹配误判</td><td><span class="chip ok">已修复</span></td><td>_parse_intent_response() 标签行解析，失败降级 chat/0.5</td></tr>
+<tr><td class="cid">P1-9</td><td>no_fake_info 恒真、短文也能过质检</td><td><span class="chip ok">已修复</span></td><td>伪造痕迹 + 来源 + 章节 + 字数硬门槛</td></tr>
+<tr><td class="cid">P1-10</td><td>Tavily None 写入字面 "None"</td><td><span class="chip ok">已修复</span></td><td>_coerce_text / _normalize_tavily_response，全失败返回失败态</td></tr>
+<tr><td class="cid">P1-11</td><td>车站空缓存 → 伪造车次且 success=True</td><td><span class="chip ok">已修复</span></td><td>3,365 条基线映射 + 质量字段 + 估算标注 + 时长兜底</td></tr>
+<tr><td class="cid">P1-12</td><td>aiohttp 会话未关闭、QPS 无限递归</td><td><span class="chip ok">已修复</span></td><td>aenter/aexit + 幂等 close() + 3 次上限指数退避</td></tr>
+<tr><td class="cid">P1-13</td><td>汉字黑名单误杀颐和园 / 人民广场</td><td><span class="chip ok">已修复</span></td><td>_looks_like_place()；目的地缺失返回追问文案</td></tr>
+<tr><td class="cid">P1-14</td><td>tool_rag 引用 0 次；RAG 结果被丢弃</td><td><span class="chip ok">已修复</span></td><td>阶段 7 完整接入，阶段 10 消除自回显</td></tr>
+<tr><td class="cid">P1-15</td><td>simple_test.py 写 logs/ 目录不存在</td><td><span class="chip todo">遗留</span></td><td class="note">低优先级辅助脚本，未纳入本轮范围</td></tr>
+<tr><td class="cid">P1-16</td><td>搜索/整理时间硬编码 2026 年 5 月</td><td><span class="chip ok">已修复</span></td><td>datetime.now() 动态生成</td></tr>
+<tr><td class="cid">P2-17</td><td>双重 async with；get_langgraph_tools 产物无人用</td><td><span class="chip part">部分</span></td><td>引用计数已修；工具转换产物仍仅用于日志/测试（OBS-02/03）</td></tr>
+<tr><td class="cid">P2-18</td><td>Agent / LLM 客户端重复实例化</td><td><span class="chip todo">遗留</span></td><td class="note">功能无影响，未做缓存优化</td></tr>
+<tr><td class="cid">P2-19</td><td>rag_text 未定义；流式 chat 重复调 LLM；记忆固定 default</td><td><span class="chip part">部分</span></td><td>rag_text 及 3 个质量字段已补；后两项未改</td></tr>
+<tr><td class="cid">P2-20</td><td>RAG 结果被丢弃；50 字切片伪流式</td><td><span class="chip part">部分</span></td><td>RAG 结果已真正追加；分段推送仍保留（设计取舍）</td></tr>
+<tr><td class="cid">P2-21</td><td>无效类型注解、SSE 与 Streamable HTTP 错配</td><td><span class="chip ok">已修复</span></td><td>Optional[Union[...]]；远程统一 /mcp</td></tr>
+<tr><td class="cid">P2-22</td><td>.env ~30 项 vs Settings 12 项，配置漂移</td><td><span class="chip part">部分</span></td><td>LLM/RAG/嵌入已补齐，废弃键清理至 27；个别非声明键仍被忽略</td></tr>
+<tr><td class="cid">P2-23</td><td>死代码与散落辅助脚本</td><td><span class="chip part">部分</span></td><td>高级 RAG 已标注实验性；根目录辅助脚本仍保留</td></tr>
+<tr><td class="cid">P2-24</td><td>PROJECT_STRUCTURE.md 统计失真</td><td><span class="chip part">部分</span></td><td>曾更新至 53 个 .py；<b>当前该文件不在工作区</b>（git 索引中为暂存删除），说明职责由本总报告承担</td></tr>
+<tr><td class="cid">P3-25</td><td>.env 明文密钥；缺 .env.example</td><td><span class="chip part">部分</span></td><td>.gitignore 已覆盖、废弃键清理；仍建议 .env.example 并检查 git 历史</td></tr>
+<tr><td class="cid">P3-26</td><td>LANGSMITH_TRACING=true 持续 403 噪音</td><td><span class="chip ok">已修复</span></td><td>改 false 并移除无效 key；实测 403 计数 0</td></tr>
+<tr><td class="cid">P3-27</td><td>CORS "*"；MCP 绑定 0.0.0.0:9000 无鉴权</td><td><span class="chip todo">遗留</span></td><td><b>安全风险</b>：启用远程时必须限内网 + 加认证</td></tr>
+<tr><td class="cid">P3-28</td><td>清理脚本含 **/.git 等删除规则</td><td><span class="chip ok">已修复</span></td><td>规则移除，仅保留可选 logs 清理</td></tr>
+<tr><td class="cid">P3-29</td><td>无 requirements.txt / 自动化测试</td><td><span class="chip part">部分</span></td><td>已有 compileall + 26/26 桩件回归；requirements.txt 与 tests/ 尚未固化</td></tr>
+</table>
+<div class="box good"><b>小结</b>：4 个 P0 全部关闭；12 个 P1 中 11 个完全修复，仅 P1-15（辅助脚本日志目录）遗留；P2 / P3 剩余项均为架构整洁、性能优化、安全加固与工程基线，不影响功能交付。</div>
+
+<h3>3.2 验收发现的 5 项缺陷（DEF-01 ~ DEF-05）：全部已修复</h3>
+<table class="t">
+<tr><th>编号</th><th>严重度</th><th>问题</th><th>最终修复</th><th>验证证据</th></tr>
+<tr><td class="cid">DEF-01</td><td><span class="chip part">中</span></td><td>FAISS.load_local 缺 allow_dangerous_deserialization，已有索引无法重载，异常被静默吞掉</td><td>补参数（仅自产索引）+ manifest.json 校验模型签名，不兼容自动重建 + last_error / logger.exception 不再静默返回 False</td><td>桩件：重载后 ntotal=2；换别名/维度不兼容自动重建</td></tr>
+<tr><td class="cid">DEF-02</td><td><span class="chip low">低</span></td><td>高德对直辖市返回 city=[]，/location 拼出 "[]东城区"</td><td>client.py 新增 _as_text() 在 SDK 边界归一，city or province；前端二次防御</td><td>桩件返回 '北京市东城区'；regeocode_city 为字符串</td></tr>
+<tr><td class="cid">DEF-03</td><td><span class="chip part">中</span></td><td>SSE 服务端可启动但三种客户端连接方式全部初始化超时</td><td>服务端改 transport="streamable-http"（/mcp），保留 run_mcp_sse 别名；客户端显式 StreamableHttpTransport + init_timeout=15</td><td>REMOTE_HTTP: OK tools=8 rag_stats_len=331（走产品 MCPStreamHTTPClient）</td></tr>
+<tr><td class="cid">DEF-04</td><td><span class="chip part">中</span></td><td>TravelAgent 忽略 data_quality/is_realtime/warnings，提示词仍写「实时精确」</td><td>读出已透传的质量字段；提示词条件化 + 质量声明块；费用/耗时标注估算；<b>代码强制追加</b>「请勿据此购票」免责声明；字段回传到 /chat 与 done 事件</td><td>真实 E2E：travel → partial / is_realtime=false / warnings=3 / 免责声明=True / 无伪造；9 项质量断言通过</td></tr>
+<tr><td class="cid">DEF-05</td><td><span class="chip low">低</span></td><td>LangSmith 失效 key 导致每次 LLM 调用打印 403</td><td>.env 改 LANGSMITH_TRACING=false、移除无效密钥</td><td>main.py 冒烟日志 403 计数 0</td></tr>
+</table>
+<div class="box warn"><b>DEF-04 复核要点</b>：route_agent.py:128-130 本就已透传质量字段，丢弃点在 travel_agent.py；且 <code>route_success=True</code> <b>不代表</b>实时（route_agent 在 <code>success or route_info</code> 即返回成功），判据只能是 <code>is_realtime</code> + <code>data_quality</code>。免责声明必须由代码追加，只写进提示词时 LLM 可能省略。</div>
+
+<h3>3.3 优化方案 10 项（OPT）实施状态</h3>
+<table class="t">
+<tr><th>编号</th><th>内容</th><th>优先级</th><th>状态</th></tr>
+<tr><td class="cid">OPT-01</td><td>DEF-04 数据真实性闭环</td><td>P0</td><td><span class="chip ok">已落地</span></td></tr>
+<tr><td class="cid">OPT-02</td><td>DEF-01 FAISS 持久化 + manifest</td><td>P1</td><td><span class="chip ok">已落地</span></td></tr>
+<tr><td class="cid">OPT-03</td><td>DEF-03 统一 Streamable HTTP（方案 A）</td><td>P1</td><td><span class="chip ok">已落地</span></td></tr>
+<tr><td class="cid">OPT-04</td><td>OBS-01 消除 RAG 自命中回显（先检索后入库）</td><td>P1</td><td><span class="chip ok">已落地</span></td></tr>
+<tr><td class="cid">OPT-05</td><td>DEF-02 直辖市定位归一</td><td>P2</td><td><span class="chip ok">已落地</span></td></tr>
+<tr><td class="cid">OPT-06</td><td>DEF-05 消除 LangSmith 噪音</td><td>P2</td><td><span class="chip ok">已落地</span></td></tr>
+<tr><td class="cid">OPT-07</td><td>高级 RAG / 死代码治理</td><td>P2</td><td><span class="chip part">部分</span>：已标注实验性；未迁移目录、未删除 get_langgraph_tools()</td></tr>
+<tr><td class="cid">OPT-08</td><td>配置与密钥卫生</td><td>P2</td><td><span class="chip part">部分</span>：.env 废弃键已清理（37→27）；.env.example 未提供</td></tr>
+<tr><td class="cid">OPT-09</td><td>工程基线（恢复文档、分主题提交、打 tag）</td><td>P2</td><td><span class="chip part">部分</span>：instruction 曾恢复；<b>git 尚未提交 / 未打 tag</b></td></tr>
+<tr><td class="cid">OPT-10</td><td>性能 / 可观测性 / 回归资产固化</td><td>增强</td><td><span class="chip todo">未做</span>：tests/acceptance、RAG_WARMUP_ON_STARTUP、前端质量徽标</td></tr>
+</table>
+
+<h3>3.4 观察项（OBS）状态</h3>
+<table class="t">
+<tr><th>编号</th><th>观察</th><th>状态</th></tr>
+<tr><td class="cid">OBS-01</td><td>首次 RAG 回显本篇攻略片段</td><td><span class="chip ok">已消除</span>：_rag_node 改为先检索历史再入库，干净库首次为 rag:no_hits</td></tr>
+<tr><td class="cid">OBS-02</td><td>ParentChildRAG / DualVectorRAG / DatabaseManager 未被业务调用</td><td><span class="chip part">仍在</span>：已标注实验性，功能本身验收通过（RAG-02/03/04）</td></tr>
+<tr><td class="cid">OBS-03</td><td>get_langgraph_tools() 产物未被消费</td><td><span class="chip part">仍在</span>：工作流走 MCPAdapter.call_tool()</td></tr>
+<tr><td class="cid">OBS-04</td><td>.env 约 10 个废弃键</td><td><span class="chip ok">已清理</span>（37 → 27）</td></tr>
+<tr><td class="cid">OBS-05</td><td>instruction/ 未恢复、大量改动未提交</td><td><span class="chip part">部分</span>：文档曾恢复，当前 instruction/ 为空且 git 索引中为暂存删除；源码改动已生效，git status 仅剩 6 个文档删除项</td></tr>
+</table>
+</section>
+
+<section id="s4">
+<h2>4. 全功能验收与回归证据</h2>
+<h3>4.1 80 用例结果（阶段 8 基线）</h3>
+<table class="t">
+<tr><th>分节</th><th>用例</th><th>通过</th><th>未通过</th><th>跳过</th><th>通过率</th></tr>
+<tr><td>环境与静态层</td><td class="num">19</td><td class="num ok">19</td><td class="num">0</td><td class="num">0</td><td class="num">100%</td></tr>
+<tr><td>MCP Server 能力</td><td class="num">20</td><td class="num ok">20</td><td class="num">0</td><td class="num">0</td><td class="num">100%</td></tr>
+<tr><td>工作流端到端</td><td class="num">6</td><td class="num ok">6</td><td class="num">0</td><td class="num">0</td><td class="num">100%</td></tr>
+<tr><td>组件级（LLM/RAG/高德）</td><td class="num">13</td><td class="num ok">12</td><td class="num bad">1</td><td class="num">0</td><td class="num">92%</td></tr>
+<tr><td>FastAPI 接口层</td><td class="num">17</td><td class="num ok">15</td><td class="num bad">1</td><td class="num">1</td><td class="num">88%</td></tr>
+<tr><td>双传输模式</td><td class="num">2</td><td class="num ok">1</td><td class="num bad">1</td><td class="num">0</td><td class="num">50%</td></tr>
+<tr><td>入口冒烟</td><td class="num">3</td><td class="num ok">3</td><td class="num">0</td><td class="num">0</td><td class="num">100%</td></tr>
+<tr><td><b>合计</b></td><td class="num"><b>80</b></td><td class="num ok"><b>76</b></td><td class="num bad"><b>3</b></td><td class="num"><b>1</b></td><td class="num"><b>95.0%</b></td></tr>
+</table>
+<p class="muted">3 项 FAIL 对应 DEF-01（RAG-06）、DEF-02（API-05B）、DEF-03（SSE-02）；1 项 SKIP 为破坏性接口 DELETE /memory/sessions（仅静态确认路由已注册）。DEF-04 / DEF-05 未计入 FAIL，但作为数据真实性风险与日志噪音列入缺陷清单，并已在阶段 10 修复。</p>
+
+<h3>4.2 主链路关键正向证据</h3>
+<ul>
+<li><code>web_search</code>：6 组查询 / 5,648 字，结构化 6 条；<code>route_planning</code>：success=false / route_available=true / data_quality=partial / is_realtime=false / warnings=3 / 1067km。</li>
+<li>4 条意图真实跑通：chat(0.99)、route(0.95)、search(0.97, search→rag:hits=4)、travel(0.95)；run_stream 19 个事件含 step/partial/done；目的地缺失守卫返回 destination_not_recognized。</li>
+<li>本地 bge-m3 离线加载 1024 维、范数 1.0；ParentChildRAG 父上下文回填、DualVectorRAG combined/hybrid、Chroma+FAISS CRUD 均通过。</li>
+<li>质检：完整攻略 100 分通过；90 字短文 80 分 passed=false；含 Check 12306 95 分 passed=false。</li>
+<li>车站编码 3,365 条离线加载（北京→BJP、上海虹桥→AOH）；format_duration(0) → 「暂无数据」。</li>
+<li>main.py EXIT 0，无 Traceback / RuntimeError / cancel scope，建连断连各 1 次，9000 端口无残留。</li>
+</ul>
+
+<h3>4.3 阶段 10 修复后的回归</h3>
+<table class="t">
+<tr><th>验证项</th><th>结果</th></tr>
+<tr><td>全量 compileall</td><td class="num ok">0 错误</td></tr>
+<tr><td>桩件回归</td><td class="num ok">26/26（FAISS 重载 ntotal=2、manifest 不兼容自动重建、travel 9 项质量断言、RAG 顺序 retrieve→index、直辖市 '北京市东城区' 等）</td></tr>
+<tr><td>远程 HTTP 模式</td><td class="num ok">REMOTE_HTTP: OK tools=8 rag_stats_len=331</td></tr>
+<tr><td>真实 search 链路</td><td class="num ok">execution_path=['search','rag:no_hits']，不再自回显</td></tr>
+<tr><td>真实 travel 链路</td><td class="num ok">data_quality=partial / is_realtime=false / warnings=3 / 免责声明=True / 无伪造</td></tr>
+<tr><td>main.py 冒烟</td><td class="num ok">EXIT 0；异常 0；LangSmith 403 计数 0；9000 端口无残留</td></tr>
+<tr><td>临时产物</td><td class="num ok">探针脚本、日志、_acceptance/、data/memory/ 测试会话全部清理</td></tr>
+</table>
+
+<div class="box warn"><b>⚠️ 期望值变更（复测必读）</b>：验收报告 WF-03 记录的 <code>rag:hits=4</code> 来自「先入库本篇 → 再检索」的自命中。阶段 10 调整为「先检索历史 → 再入库本篇」后，干净知识库下<b>首次</b>同目的地提问应为 <code>rag:no_hits</code>，<b>第二次</b>才命中上一篇入库内容。这是期望值变更，不是回归失败；复测前需更新 WF-03 断言，否则会误判。</div>
+</section>
+
+<section id="s5">
+<h2>5. 当前系统状态</h2>
+<h3>5.1 能力矩阵</h3>
+<table class="t">
+<tr><th>能力</th><th>状态</th><th>说明</th></tr>
+<tr><td>CLI 独立运行</td><td><span class="chip ok">✅</span></td><td>main.py 无需手动起服务，EXIT 0</td></tr>
+<tr><td>Web 服务</td><td><span class="chip ok">✅</span></td><td>FastAPI 全路由 + /ui 静态资源 + SSE 流式</td></tr>
+<tr><td>MCP 同进程（默认）</td><td><span class="chip ok">✅</span></td><td>8 tools / 2 prompts / 1 resource</td></tr>
+<tr><td>MCP 远程（opt-in）</td><td><span class="chip ok">✅</span></td><td>Streamable HTTP /mcp，需启用配置并重启</td></tr>
+<tr><td>4 类意图</td><td><span class="chip ok">✅</span></td><td>chat / route / search / travel，结构化解析</td></tr>
+<tr><td>RAG 知识库</td><td><span class="chip ok">✅</span></td><td>本地 bge-m3 + Chroma 持久化，幂等入库、带分数检索、阈值过滤</td></tr>
+<tr><td>数据真实性</td><td><span class="chip ok">✅</span></td><td>四级质量标注 + warnings + 代码强制免责声明 + 质检硬门槛</td></tr>
+<tr><td>会话记忆</td><td><span class="chip ok">✅</span></td><td>memory/ CRUD，隔离临时目录验证通过</td></tr>
+<tr><td>离线嵌入</td><td><span class="chip ok">✅</span></td><td>HF_HUB_OFFLINE=1 真实加载，无联网下载</td></tr>
+<tr><td>日志</td><td><span class="chip ok">✅</span></td><td>无 403 噪音，无 Traceback</td></tr>
+<tr><td>工程基线</td><td><span class="chip part">⚠️</span></td><td>未提交 / 未打 tag / 无 requirements.txt / 无 tests/</td></tr>
+</table>
+
+<h3>5.2 运行方式</h3>
+<pre># 环境：D:/miniconda3/envs/myenv312/python.exe
+cd D:/workspace/project_mcp
+
+# 1) CLI（默认，最常用）
+python -X utf8 main.py
+
+# 2) Web API
+python -X utf8 -m uvicorn frontend_api:app --host 127.0.0.1 --port 8000
+
+# 3) 仅启动 MCP 服务（远程模式用；端点 /mcp）
+python -X utf8 MCP/protocol/server.py
+
+# 4) 启用远程模式：先放开 .env 中注释的 MCP_HTTP_URL，再重启进程
+#    MCP_HTTP_URL=http://127.0.0.1:9000/mcp
+
+# 5) 全量语法检查
+python -X utf8 -m compileall -q MCP main.py frontend_api.py</pre>
+<div class="box warn"><b>安全提醒</b>：远程模式服务端当前绑定 <code>0.0.0.0:9000</code> 且无鉴权，仅限本机/内网使用，勿暴露公网（P3-27 遗留）。</div>
+
+<h3>5.3 数据真实性机制（本次治理的核心原则）</h3>
+<ul>
+<li><b>质量分级</b>：所有路线结果带 <code>data_quality = real | partial | estimated | failed</code> 与 <code>is_realtime</code>、<code>warnings</code>；估算值不再置 <code>success=True</code>。</li>
+<li><b>无数据时不编造</b>：12306 查不到车次 → 「暂不可用（请查询铁路 12306 官方）」；火车段按距离估算（250km/h + 40min 缓冲）并显式标注「非实时」。</li>
+<li><b>免责声明由代码追加</b>：travel 输出末尾强制追加「请勿据此购票，请以铁路12306或航司官网为准」，不依赖 LLM 自觉。</li>
+<li><b>字段贯通</b>：route_agent → travel_agent → WorkflowState → /chat 响应与 done 事件，前端可直接渲染「实时 / 估算 / 降级」徽标（UI 尚未实现）。</li>
+<li><b>质检硬门槛</b>：攻略含伪造/占位痕迹、缺可核查来源、章节不足 5、字数 ≤800 任一即 passed=false。</li>
+<li><b>RAG 原文直出</b>：检索片段不经 LLM 改写，标注「非实时数据，仅供参考」，避免二次编造。</li>
+</ul>
+</section>
+
+<section id="s6">
+<h2>6. 剩余风险与后续建议</h2>
+<h3>6.1 风险清单</h3>
+<table class="t">
+<tr><th>#</th><th>风险</th><th>影响</th><th>建议</th></tr>
+<tr><td class="cid">R1</td><td><b>未提交 / 未打 tag</b></td><td>改动无法回溯、无法回滚；rag_service.py 等新增文件需确认纳入版本库</td><td>按主题分 4 次提交（① LLM 与配置 ② P0 与数据真实性 ③ RAG 接入 ④ 文档治理），打 v1.2-acceptance tag</td></tr>
+<tr><td class="cid">R2</td><td>PROJECT_STRUCTURE.md 与 instruction/ 5 份历史文档处于 git 暂存删除状态</td><td>项目自带文档缺失</td><td>确认是否恢复；本总报告已承担结构说明职责</td></tr>
+<tr><td class="cid">R3</td><td><b>CORS "*" 与 MCP 0.0.0.0 无鉴权</b>（P3-27）</td><td>启用远程时任意主机可调用工具消耗 API 额度</td><td>限内网/白名单 + Token；不要暴露 9000 到公网</td></tr>
+<tr><td class="cid">R4</td><td>外部依赖强约束</td><td>Tavily / 高德 / 12306 / chatanywhere 任一限流或失效即降级该链路</td><td>保持现有诚实降级；统一加 degradation 日志字段</td></tr>
+<tr><td class="cid">R5</td><td>本地嵌入模型 5.4GB</td><td>首次 RAG 调用约 10s；检测到 CUDA 会加载到 GPU</td><td>单例懒加载已实现；部署时预留显存，可加 RAG_WARMUP_ON_STARTUP 开关</td></tr>
+<tr><td class="cid">R6</td><td>无 requirements.txt / tests/ 固化</td><td>依赖不可复现、每轮改动需重写探针</td><td>pip freeze 锁定；把 6 组高频回归固化为 tests/acceptance/</td></tr>
+<tr><td class="cid">R7</td><td>密钥卫生</td><td>.env 明文存真实 Key（已被 .gitignore 覆盖）</td><td>提供 .env.example（仅键名与占位值）；检查 git 历史是否曾提交密钥，若有则轮换</td></tr>
+<tr><td class="cid">R8</td><td>高级 RAG / get_langgraph_tools() 悬空</td><td>后来者易误认为已上线能力</td><td>已标注实验性；后续二选一：产品化（RAG_STRATEGY 工厂）或移入 experimental/</td></tr>
+</table>
+
+<h3>6.2 建议实施顺序</h3>
+<ol>
+<li><b>先固化基线</b>：确认 git status，把全部源码改动与新增文件提交，打 tag（R1 / R2）。</li>
+<li><b>再补工程资产</b>：requirements.txt、.env.example、tests/acceptance/（复用 INTENT-01 / PLACE-01 / MCP-13 / MCP-09~10 / MCP-15~18 / MCP-01~03 / RAG-06 / API-05B / WF-03 期望更新）。</li>
+<li><b>然后做安全与展示</b>：CORS 与 MCP 鉴权、前端质量徽标（后端字段已就绪）。</li>
+<li><b>最后评估增强项</b>：RAG_STRATEGY 工厂、RAG_WARMUP_ON_STARTUP、真流式 llm.astream()、LLM 客户端缓存。</li>
+</ol>
+
+<h3>6.3 明确未做事项</h3>
+<ul>
+<li>未执行 git commit / 打 tag（留待确认）。</li>
+<li>未创建 tests/acceptance/、requirements.txt、.env.example。</li>
+<li>未实现前端「实时 / 估算 / 降级」徽标（后端字段已就绪）。</li>
+<li>未改 run_stream 伪流式、未做 Agent/LLM 实例化缓存、未处理 P1-15 辅助脚本。</li>
+<li>未删除高级 RAG 与 get_langgraph_tools()，仅标注为实验性。</li>
+<li>未恢复 instruction/ 5 份历史项目文档（当前目录仅有本总报告）。</li>
+</ul>
+</section>
+
+<section id="s7">
+<h2>7. 附录</h2>
+<h3>附录 A：报告索引</h3>
+<table class="t">
+<tr><th>报告</th><th>时点</th><th>性质</th><th>与本总报告关系</th></tr>
+<tr><td class="cid">project_mcp_analysis_report.md / .html</td><td>阶段 1</td><td>架构审计与运行诊断（29 项问题、三阶段路线图）</td><td>第 1、3.1 节为其结论的更新版</td></tr>
+<tr><td class="cid">project_mcp_bugfix_recommendations.md</td><td>阶段 2~5</td><td>LLM 迁移说明 + 逐批修复建议（含 4 次状态更新）</td><td>第 2、3.1 节吸收其全部修复记录</td></tr>
+<tr><td class="cid">project_mcp_acceptance_report.md / .html</td><td>阶段 8</td><td>80 用例逐项矩阵、DEF-01~05、OBS-01~05</td><td>第 3.2、4 节为其结论 + 修复后状态</td></tr>
+<tr><td class="cid">project_mcp_optimization_plan.md / .html</td><td>阶段 9</td><td>10 项 OPT、3 批路线图、回归清单</td><td>第 3.3、6 节为其落地状态</td></tr>
+<tr><td class="cid"><b>project_mcp_final_report.md / .html（本文）</b></td><td>阶段 10 后</td><td><b>整合型总报告</b></td><td>状态冲突时以本文为准</td></tr>
+</table>
+<p class="muted">上述 4 份专项报告位于 <code>C:\Users\koishi\WorkBuddy\2026-11-01-19-35-52\</code>；本总报告位于 <code>D:\workspace\project_mcp\instruction\</code>。</p>
+
+<h3>附录 B：本轮涉及的主要改动文件</h3>
+<table class="t">
+<tr><th>模块</th><th>文件</th></tr>
+<tr><td>配置</td><td class="cid">.env / MCP/config/settings.py / .gitignore / start_mcp.bat</td></tr>
+<tr><td>LLM</td><td class="cid">MCP/core/llm_client.py</td></tr>
+<tr><td>协议 / 集成</td><td class="cid">MCP/protocol/server.py / MCP/protocol/client.py / MCP/integration/tool_adapter.py</td></tr>
+<tr><td>编排</td><td class="cid">MCP/workflow/graph.py / MCP/workflow/state.py</td></tr>
+<tr><td>智能体</td><td class="cid">intent_recognizer.py / route_agent.py / travel_agent.py / search_agent.py / rag_agent.py</td></tr>
+<tr><td>高德 / 12306</td><td class="cid">client.py / route_planner.py / train_crawler.py / py12306_client.py / utils.py / data/station_codes.json</td></tr>
+<tr><td>RAG</td><td class="cid">rag_service.py（新增） / travel_rag.py / embedding_manager.py / database_manager.py / __init__.py</td></tr>
+<tr><td>API</td><td class="cid">frontend_api.py</td></tr>
+<tr><td>文档 / 脚本</td><td class="cid">PROJECT_STRUCTURE.md / cleanup_project.py / simple_cleanup.py / instruction/</td></tr>
+</table>
+
+<h3>附录 C：约定与口径</h3>
+<ul>
+<li><b>状态优先级</b>：本总报告 &gt; 优化方案 &gt; 验收报告 &gt; 修复建议 &gt; 初始审计报告。</li>
+<li><b>数据真实性口径</b>：real = 实时接口返回；partial = 部分实时部分估算；estimated = 全部估算；failed = 无可用数据。估算一律显式标注且不得置 success=True。</li>
+<li><b>RAG 口径</b>：检索片段为原文直出，不经 LLM 改写；RAG_MAX_DISTANCE 为 L2 距离阈值，超过即过滤。</li>
+<li><b>安全口径</b>：allow_dangerous_deserialization=True 仅可用于本程序 save_local() 自产的 FAISS 索引目录，路径必须来自可信配置。</li>
+<li><b>配置口径</b>：settings 在导入时读取，client.py 的 _MCP_HTTP_URL 为模块级常量，改 .env 必须重启进程。</li>
+</ul>
+</section>
+
+<footer>报告由项目全周期实测证据整合生成 · 2026-11-03 · 不展示任何真实密钥值<br>
+project_mcp 项目总报告 · HTML 可视化版（同目录另有 Markdown 版 project_mcp_final_report.md）</footer>
+
+</div></body></html>
